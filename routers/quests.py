@@ -284,3 +284,45 @@ def delete_quest(
     # 查询成功：200 OK + 返回资源
     # 更新成功：200 OK + 返回更新后的资源
     # 删除成功：204 No Content + 不返回正文 所以这里不用写response model
+
+
+#admin用 手动改任务status
+@router.patch(
+    "/quests/{quest_id}/status",
+    response_model=schemas.QuestResponse,
+)
+def update_quest_status(
+    quest_id: int,
+    status_data: schemas.QuestStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    quest = db.get(models.Quest, quest_id)
+
+    if quest is None:
+        raise HTTPException(
+            status_code=404,
+            detail="任务不存在",
+        )
+
+    allowed_status_set = {
+        "open",
+        "commenced",
+        "finished",
+        "failed",
+        "canceled",
+    }
+
+    if status_data.status not in allowed_status_set:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "请重新规范输入status 参考管理员手册",
+            ),
+        )
+
+    quest.status = status_data.status
+
+    db.commit()
+    db.refresh(quest)
+
+    return quest
