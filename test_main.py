@@ -924,11 +924,83 @@ def test_register_duplicate_username_409():
         "detail": "用户名已存在"
     }
 
+def test_user_login_200():
+    register_response = client.post(
+        "/users/register",
+        json={
+            "username": "Handinburg",
+            "adventurer_name": "Dingburg",
+            "password": "test_password",
+        },
+    )
+    assert register_response.status_code == 201
+
+    login_response = client.post(
+        "/users/login",
+        json={
+            "username": "Handinburg",
+            "password": "test_password",
+        },
+    )
+    data= login_response.json()
+    assert login_response.status_code == 200
+    assert data["id"] == register_response.json()["id"]
+    assert data["adventurer_name"] == "Dingburg"
+    assert data["username"]=="Handinburg"
+    assert data["is_admin"] is False
+
+    assert "password" not in data
+    assert "password_hash" not in data
 
 
-# 完整的业务流程测试
+def test_login_wrong_username_or_passsword_401():
+    register_response = client.post(
+        "/users/register",
+        json={
+            "username": "Handinburg",
+            "adventurer_name": "Dingburg",
+            "password": "test_password",
+        },
+    )
+    assert register_response.status_code == 201
 
-def test_full_business_flow():
+    login_response = client.post(
+        "/users/login",
+        json={
+            "username": "Handinburg",
+            "password": "wrong_password",
+        },
+    )
+    assert login_response.status_code == 401
+    assert login_response.json() == {
+            "detail": "用户名或密码错误"
+        }
+
+    login_response = client.post(
+            "/users/login",
+            json={
+                "username": "DinburgHan",
+                "password": "test_password",
+            },
+        )
+    assert login_response.status_code == 401
+    assert login_response.json() == {
+                "detail": "用户名或密码错误"
+            }
+
+    login_response = client.post(
+                "/users/login",
+                json={
+                    "username": "123",
+                    "password": "wrong_password",
+                },
+            )
+    assert login_response.status_code == 401
+    assert login_response.json() == {
+                "detail": "用户名或密码错误"
+            }
+
+def test_party_does_quest_flow():
     db = TestSessionLocal()
     category = create_category(db, name="护送")
     user = create_user(db, username="主角")
@@ -963,3 +1035,4 @@ def test_full_business_flow():
     final_response = client.get(f"/quests/{quest_id}")
     assert final_response.status_code == 200
     assert final_response.json()["status"] == "finished"
+

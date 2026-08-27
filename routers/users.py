@@ -5,8 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
-from security import hash_password
-
+from security import hash_password, verify_password
 
 router = APIRouter(
     tags=["users"],
@@ -46,5 +45,37 @@ def register_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    return user
+
+@router.post(
+    "/users/login",
+    response_model=schemas.UserResponse,
+)
+def login_user(
+    login_data: schemas.UserLogin,
+    db: Session = Depends(get_db),
+):
+    user = db.scalar(
+        select(models.User).where(
+            models.User.username == login_data.username
+        )
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            # Unauthorized
+            detail="用户名或密码错误",
+        )
+
+    if not verify_password(
+        login_data.password,
+        user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误",
+        )
 
     return user

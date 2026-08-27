@@ -106,3 +106,7 @@ class UserResponse(BaseModel):
        #UserResponse 故意不包含：
         #password
         #password_hash
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
