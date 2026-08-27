@@ -86,3 +86,25 @@ class ParticipationResponse(BaseModel):
 
 class QuestStatusUpdate(BaseModel):
     status: str
+
+
+class UserRegister(BaseModel):
+    username: str
+    adventurer_name: str
+    password: str
+    #UserRegister 里故意没有：
+    #is_admin: bool
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    adventurer_name: str
+    is_admin: bool
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+       #UserResponse 故意不包含：
+        #password
+        #password_hash

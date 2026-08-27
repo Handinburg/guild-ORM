@@ -160,3 +160,34 @@ class Participation(Base):
     party: Mapped["Party"] = relationship(
         back_populates="participation_list",
     )
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    username: Mapped[str] = mapped_column(
+        String,
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+
+    adventurer_name: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    password_hash: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )

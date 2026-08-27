@@ -6,12 +6,24 @@ todo：尝试移chara库 尝试新建guild库
  数据方面：
  1.任务库 带类别 奖励 等 
  2.小队库 和 characters表有外键链接
- 3.任务状态：open → accepted → finished
-                  → canceled → failed
+ 3.任务状态：open → commenced → (submitted)?
+    finished → canceled → failed
+
+业务流程：
+1.身份管理
+野人character---（sign in）--→user---（recruit）--→party_member
+
+2.任务流程管理
+发布（admin）
+接取（party_leader）
+提交（party_leader）?未做
+审核结果(admin)
+
+仍要做的路由：
+1.招聘模块
+2.提交模块
+3.野人注册模块
 
 部署方面：
-1.单个小队成员能登陆 看见所有open 自己accepted任务
-2.队长能够接受任务
-3.admin能登录 负责新建任务
-
-#leader bind party class
+什么jwt乱七八糟的
+库要动，现在没有野人注册
