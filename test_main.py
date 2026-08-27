@@ -2,10 +2,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
 
 import models
 from database import get_db
 from main import app
+from security import verify_password
 
 
 # 使用内存数据库，避免读写正式 guild.db
@@ -72,6 +74,19 @@ def create_character(db, name="测试角色", race="人类", level=1):
 #为什么要return 养成习惯 新建对象习惯拿他的新id（refresh）
 # 之前是（character_id = cursor.lastrowid）之类的 用于后续测试
 
+def create_user(db,username = "testuser123",
+                adventurer_name="test_adventurer_name",
+                password_hash="test_password_hash",
+                ):
+    user = models.User(
+        username=username,
+        adventurer_name=adventurer_name,
+        password_hash=password_hash,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 def create_party(db, name="测试小队"):
     party = models.Party(name=name)
@@ -106,10 +121,10 @@ def create_quest(
     return quest
 
 
-def add_member(db, party_id, character_id, is_leader=False):
+def add_member(db, party_id, user_id, is_leader=False):
     member = models.PartyMember(
         party_id=party_id,
-        character_id=character_id,
+        user_id=user_id,
         is_leader=is_leader,
     )
     db.add(member)
@@ -158,10 +173,10 @@ def test_create_duplicate_party_returns_409():
 def test_get_party_returns_members():
     db = TestSessionLocal()
     party = create_party(db, name="成员小队")
-    character = create_character(db, name="角色A")
-    add_member(db, party.id, character.id, is_leader=True)
+    user = create_user(db, username="角色A")
+    add_member(db, party.id, user.id, is_leader=True)
     party_id = party.id
-    character_id = character.id
+    user_id = user.id
     db.close()
 
     response = client.get(f"/parties/{party_id}")
@@ -176,7 +191,7 @@ def test_get_party_returns_members():
     assert data["id"] == party_id
     assert data["name"] == "成员小队"
     assert len(data["member_list"]) == 1
-    assert data["member_list"][0]["character_id"] == character_id
+    assert data["member_list"][0]["user_id"] == user_id
     assert data["member_list"][0]["is_leader"] is True
 
 
@@ -209,35 +224,47 @@ def test_delete_missing_party_returns_404():
 def test_add_member_to_existing_party():
     db = TestSessionLocal()
     party = create_party(db, name="战队")
-    character = create_character(db, name="勇者")
+    user = create_user(db, username="勇者")
     party_id = party.id
-    character_id = character.id
+    user_id = user.id
     db.close()
 
     response = client.post(
         f"/parties/{party_id}/members",
-        json={"character_id": character_id, "is_leader": True},
+        json={"user_id": user_id, "is_leader": True},
     )
 
     assert response.status_code == 201
     data = response.json()
     assert data["party_id"] == party_id
-    assert data["character_id"] == character_id
+    assert data["user_id"] == user_id
     assert data["is_leader"] is True
-    assert data["character"]["name"] == "勇者"
+    assert data["user"]["username"] == "勇者"
+    assert "character_id" not in data
+    assert "character" not in data
+
+    db = TestSessionLocal()
+    stored_member = db.scalar(
+        select(models.PartyMember).where(
+            models.PartyMember.user_id == user_id
+        )
+    )
+    assert stored_member is not None
+    assert stored_member.party_id == party_id
+    db.close()
 
 
 def test_add_member_to_missing_party_returns_404():
     response = client.post(
         "/parties/999999/members",
-        json={"character_id": 1, "is_leader": False},
+        json={"user_id": 1, "is_leader": False},
     )
 
     assert response.status_code == 404
     assert response.json() == {"detail": "小队不存在"}
 
 
-def test_add_missing_character_to_party_returns_404():
+def test_add_missing_user_to_party_returns_404():
     db = TestSessionLocal()
     party = create_party(db, name="缺人小队")
     party_id = party.id
@@ -245,48 +272,107 @@ def test_add_missing_character_to_party_returns_404():
 
     response = client.post(
         f"/parties/{party_id}/members",
-        json={"character_id": 999999, "is_leader": False},
+        json={"user_id": 999999, "is_leader": False},
     )
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "角色不存在"}
+    assert response.json() == {"detail": "用户不存在"}
 
 
-def test_add_duplicate_member_returns_409():
+def test_add_member_rejects_old_character_id_field():
     db = TestSessionLocal()
-    party = create_party(db, name="重复小队")
-    character = create_character(db, name="重复角色")
-    add_member(db, party.id, character.id, is_leader=False)
+    party = create_party(db, name="旧字段小队")
+    character = create_character(db, name="独立角色")
     party_id = party.id
     character_id = character.id
     db.close()
 
     response = client.post(
         f"/parties/{party_id}/members",
-        json={"character_id": character_id, "is_leader": False},
+        json={"character_id": character_id},
+    )
+
+    assert response.status_code == 422
+    db = TestSessionLocal()
+    assert db.scalar(select(models.PartyMember)) is None
+    assert db.get(models.Character, character_id) is not None
+    db.close()
+
+
+def test_add_duplicate_member_returns_409():
+    db = TestSessionLocal()
+    party = create_party(db, name="重复小队")
+    user = create_user(db, username="重复角色")
+    add_member(db, party.id, user.id, is_leader=False)
+    party_id = party.id
+    user_id = user.id
+    db.close()
+
+    response = client.post(
+        f"/parties/{party_id}/members",
+        json={"user_id": user_id, "is_leader": False},
     )
 
     assert response.status_code == 409
-    assert response.json() == {"detail": "该角色已经加入小队"}
+    assert response.json() == {"detail": "该用户已经加入小队"}
+
+    db = TestSessionLocal()
+    members = db.scalars(
+        select(models.PartyMember).where(
+            models.PartyMember.user_id == user_id
+        )
+    ).all()
+    assert len(members) == 1
+    assert members[0].party_id == party_id
+    db.close()
+
+
+def test_user_cannot_join_two_parties():
+    db = TestSessionLocal()
+    first_party = create_party(db, name="第一小队")
+    second_party = create_party(db, name="第二小队")
+    user = create_user(db, username="只能入一队")
+    add_member(db, first_party.id, user.id)
+    first_party_id = first_party.id
+    second_party_id = second_party.id
+    user_id = user.id
+    db.close()
+
+    response = client.post(
+        f"/parties/{second_party_id}/members",
+        json={"user_id": user_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "该用户已经加入小队"}
+    db = TestSessionLocal()
+    members = db.scalars(
+        select(models.PartyMember).where(
+            models.PartyMember.user_id == user_id
+        )
+    ).all()
+    assert len(members) == 1
+    assert members[0].party_id == first_party_id
+    db.close()
 
 
 def test_remove_member_success():
     db = TestSessionLocal()
     party = create_party(db, name="离队小队")
-    character = create_character(db, name="离队角色")
-    add_member(db, party.id, character.id, is_leader=False)
+    user = create_user(db, username="离队角色")
+    add_member(db, party.id, user.id, is_leader=False)
     party_id = party.id
-    character_id = character.id
+    user_id = user.id
     db.close()
 
-    response = client.delete(f"/parties/{party_id}/members/{character_id}")
+    response = client.delete(f"/parties/{party_id}/members/{user_id}")
 
     assert response.status_code == 204
     assert response.content == b""
 
     check_response = client.get(f"/parties/{party_id}")
     assert check_response.status_code == 200
-    assert all(item["character_id"] != character_id for item in check_response.json()["member_list"])
+    assert all(item["user_id"] != user_id for item in check_response.json()["member_list"])
 
 
 def test_remove_missing_member_returns_404():
@@ -298,14 +384,14 @@ def test_remove_missing_member_returns_404():
     response = client.delete(f"/parties/{party_id}/members/999999")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "该角色不在此小队中"}
+    assert response.json() == {"detail": "该用户不在此小队中"}
 
 
 def test_change_leader_success():
     db = TestSessionLocal()
     party = create_party(db, name="换队长小队")
-    old_leader = create_character(db, name="旧队长")
-    new_leader = create_character(db, name="新队长")
+    old_leader = create_user(db, username="旧队长")
+    new_leader = create_user(db, username="新队长")
     add_member(db, party.id, old_leader.id, is_leader=True)
     add_member(db, party.id, new_leader.id, is_leader=False)
     party_id = party.id
@@ -314,28 +400,37 @@ def test_change_leader_success():
 
     response = client.patch(
         f"/parties/{party_id}/leader",
-        json={"character_id": new_leader_id},
+        json={"user_id": new_leader_id},
     )
 
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == party_id
-    assert [member["character_id"] for member in data["member_list"] if member["is_leader"]] == [new_leader_id]
+    assert [member["user_id"] for member in data["member_list"] if member["is_leader"]] == [new_leader_id]
+
+    db = TestSessionLocal()
+    stored_members = db.scalars(
+        select(models.PartyMember).where(
+            models.PartyMember.party_id == party_id
+        )
+    ).all()
+    assert [member.user_id for member in stored_members if member.is_leader] == [new_leader_id]
+    db.close()
 
 
 def test_change_leader_to_non_member_returns_404():
     db = TestSessionLocal()
     party = create_party(db, name="非成员队长")
-    old_leader = create_character(db, name="当前队长")
+    old_leader = create_user(db, username="当前队长")
     add_member(db, party.id, old_leader.id, is_leader=True)
-    outsider = create_character(db, name="外部角色")
+    outsider = create_user(db, username="外部角色")
     party_id = party.id
     outsider_id = outsider.id
     db.close()
 
     response = client.patch(
         f"/parties/{party_id}/leader",
-        json={"character_id": outsider_id},
+        json={"user_id": outsider_id},
     )
 
     assert response.status_code == 404
@@ -345,7 +440,7 @@ def test_change_leader_to_non_member_returns_404():
 def test_change_leader_to_same_current_leader_returns_409():
     db = TestSessionLocal()
     party = create_party(db, name="重复队长")
-    leader = create_character(db, name="队长本人")
+    leader = create_user(db, username="队长本人")
     add_member(db, party.id, leader.id, is_leader=True)
     party_id = party.id
     leader_id = leader.id
@@ -353,7 +448,7 @@ def test_change_leader_to_same_current_leader_returns_409():
 
     response = client.patch(
         f"/parties/{party_id}/leader",
-        json={"character_id": leader_id},
+        json={"user_id": leader_id},
     )
 
     assert response.status_code == 409
@@ -743,15 +838,102 @@ def test_last_party_withdraw_reopens_quest():
     assert check_response.status_code == 200
     assert check_response.json()["status"] == "open"
 
+def test_register_user_201():
+    response = client.post(
+        "/users/register",
+        json={
+            "username": "test_wild_rat",
+            "adventurer_name": "测试吱吱",
+            "password": "guild12345",
+        },
+    )
+
+    assert response.status_code == 201
+
+    data = response.json()
+
+    assert data["username"] == "test_wild_rat"
+    assert data["adventurer_name"] == "测试吱吱"
+    assert data["is_admin"] is False
+
+    assert "id" in data
+    assert "password" not in data
+    assert "password_hash" not in data
+
+    db = TestSessionLocal()
+    stored_user = db.scalar(
+        select(models.User).where(
+            models.User.username == "test_wild_rat"
+        )
+    )
+    assert stored_user is not None
+    assert stored_user.password_hash != "guild12345"
+    assert verify_password("guild12345", stored_user.password_hash)
+    assert stored_user.is_admin is False
+    db.close()
+
+
+def test_register_cannot_grant_admin_or_expose_password():
+    response = client.post(
+        "/users/register",
+        json={
+            "username": "not_an_admin",
+            "adventurer_name": "普通冒险者",
+            "password": "guild12345",
+            "is_admin": True,
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["is_admin"] is False
+    assert "password" not in data
+    assert "password_hash" not in data
+
+    db = TestSessionLocal()
+    stored_user = db.scalar(
+        select(models.User).where(
+            models.User.username == "not_an_admin"
+        )
+    )
+    assert stored_user is not None
+    assert stored_user.is_admin is False
+    db.close()
+
+def test_register_duplicate_username_409():
+    user_data = {
+        "username": "duplicate_rat",
+        "adventurer_name": "重复鼠",
+        "password": "guild12345",
+    }
+
+    first_response = client.post(
+        "/users/register",
+        json=user_data,
+    )
+
+    assert first_response.status_code == 201
+
+    second_response = client.post(
+        "/users/register",
+        json=user_data,
+    )
+
+    assert second_response.status_code == 409
+    assert second_response.json() == {
+        "detail": "用户名已存在"
+    }
+
+
 
 # 完整的业务流程测试
 
 def test_full_business_flow():
     db = TestSessionLocal()
     category = create_category(db, name="护送")
-    character = create_character(db, name="主角")
+    user = create_user(db, username="主角")
     party = create_party(db, name="护送队")
-    add_member(db, party.id, character.id, is_leader=True)
+    add_member(db, party.id, user.id, is_leader=True)
     quest = create_quest(
         db,
         title="护送商队",

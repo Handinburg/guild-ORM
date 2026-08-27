@@ -68,33 +68,33 @@ def add_party_member(
             status_code=404,#notfound
             detail="小队不存在",
         )
-#2.人物id检查
-    character = db.get(
-        models.Character,
-        party_member_data.character_id,
+#2.用户id检查
+    user = db.get(
+        models.User,
+        party_member_data.user_id,
     )
 
-    if character is None:
+    if user is None:
         raise HTTPException(
             status_code=404,
-            detail="角色不存在",
+            detail="用户不存在",
         )
 
 
     existing_party_member = db.scalars(
         select(models.PartyMember).where(
-            models.PartyMember.character_id
-            == party_member_data.character_id
+            models.PartyMember.user_id
+            == party_member_data.user_id
         )
     ).first()
-#4.人物 是否已有小队
+#4.用户是否已有小队
     if existing_party_member is not None:
         raise HTTPException(
             status_code=409,
             #409 Conflict
-            detail="该角色已经加入小队",
+            detail="该用户已经加入小队",
         )
-#5.人物 要加入的队伍里 是否已经有队长
+#5.用户要加入的队伍里是否已经有队长
     if party_member_data.is_leader:
         existing_leader = db.scalars(
             select(models.PartyMember).where(
@@ -112,7 +112,7 @@ def add_party_member(
 #开始做准备变量 把pydantic检验后的PartyMemberCreate实例塞给类实例
     party_member = models.PartyMember(
         party_id=party_id,
-        character_id=party_member_data.character_id,
+        user_id=party_member_data.user_id,
         is_leader=party_member_data.is_leader,
     )
 
@@ -163,25 +163,25 @@ def get_parties(
 
 #删除某小队里的 某人 队长用 或者用户本人用
 @router.delete(
-    "/parties/{party_id}/members/{character_id}",
+    "/parties/{party_id}/members/{user_id}",
     status_code=204,#204 no content
 )
 def remove_party_member(
     party_id: int,
-    character_id: int,
+    user_id: int,
     db: Session = Depends(get_db),
 ):
     party_member = db.scalars(
         select(models.PartyMember).where(
             models.PartyMember.party_id == party_id,
-            models.PartyMember.character_id == character_id,
+            models.PartyMember.user_id == user_id,
         )
     ).first()
 
     if party_member is None:
         raise HTTPException(
             status_code=404,
-            detail="该角色不在此小队中",
+            detail="该用户不在此小队中",
         )
 
     db.delete(party_member)
@@ -233,8 +233,8 @@ def change_party_leader(
     new_leader_party_member = db.scalars(
         select(models.PartyMember).where(
             models.PartyMember.party_id == party_id,
-            models.PartyMember.character_id
-            == leader_data.character_id,
+            models.PartyMember.user_id
+            == leader_data.user_id,
         )
     ).first()
 

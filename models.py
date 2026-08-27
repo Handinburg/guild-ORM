@@ -117,8 +117,8 @@ class PartyMember(Base):
         #你之前不是要一堆PartyMember的list吗 那还说啥了 给了
     )
 
-    character_id: Mapped[int] = mapped_column(
-        ForeignKey("characters.id"),
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
         unique=True,
     )
 
@@ -134,7 +134,7 @@ class PartyMember(Base):
         #一对relationship（back_populates）共用一个外键
     )
 
-    character: Mapped["Character"] = relationship()
+    user: Mapped["User"] = relationship()
 
 class Participation(Base):
     __tablename__ = "participations"

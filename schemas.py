@@ -34,16 +34,14 @@ class PartyCreate(BaseModel):
 
 
 class PartyMemberCreate(BaseModel):
-    character_id: int
+    user_id: int
     is_leader: bool = False
 
 
-class CharacterBriefResponse(BaseModel):
+class UserBriefResponse(BaseModel):
     id: int
-    name: str | None
-    race: str | None
-    level: int | None
-
+    username: str | None
+    adventurer_name:str | None
     model_config = ConfigDict(
         from_attributes=True
     )
@@ -51,9 +49,9 @@ class CharacterBriefResponse(BaseModel):
 class PartyMemberResponse(BaseModel):
     id: int
     party_id: int
-    character_id: int
+    user_id: int
     is_leader: bool
-    character: CharacterBriefResponse
+    user: UserBriefResponse
 
     model_config = ConfigDict(
         from_attributes=True
@@ -70,10 +68,10 @@ class PartyResponse(BaseModel):
     )
 
 class LeaderUpdate(BaseModel):
-    character_id: int
+    user_id: int
 
 class LeaderVerification(BaseModel):
-    character_id: int
+    user_id: int
 
 class ParticipationResponse(BaseModel):
     id: int
