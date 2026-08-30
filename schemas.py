@@ -31,6 +31,7 @@ class QuestUpdate(BaseModel):
 
 class PartyCreate(BaseModel):
     name: str
+    leader_user_id: int
 
 
 class PartyMemberCreate(BaseModel):

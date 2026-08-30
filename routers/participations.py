@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
+from auth import require_leader
 
 
 router = APIRouter(
@@ -21,6 +22,7 @@ def accept_quest(
     party_id: int,
     quest_id: int,
     db: Session = Depends(get_db),
+    _leader = Depends(require_leader),
 ):
     party = db.get(models.Party, party_id)
 
@@ -178,6 +180,7 @@ def withdraw_from_quest(
     party_id: int,
     quest_id: int,
     db: Session = Depends(get_db),
+    _leader = Depends(require_leader),
 ):
     quest = db.get(models.Quest, quest_id)
 

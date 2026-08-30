@@ -2,7 +2,7 @@
 # 是 客户端 发 token 回来 时候才用到的 所以不写在security里
 #security只负责底层验证密码啥的
 
-
+from sqlalchemy import select
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import (
@@ -104,6 +104,23 @@ def get_current_user(
     return user
 
 
+def get_current_member(current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) :
+    current_member = db.scalar(
+        select(models.PartyMember).where(
+            models.PartyMember.user_id == current_user.id
+        )
+    )
+
+    if current_member is None:
+        raise HTTPException(
+            status_code=403,
+            detail="当前用户不在小队中",
+        )#Token有效，身份是真的
+    return current_member
+
+
 def require_admin(
     current_user: models.User = Depends(get_current_user),
 ) -> models.User:
@@ -115,3 +132,31 @@ def require_admin(
         )
 
     return current_user
+
+
+#依赖链：
+# 客户发POST /parties/8/membersAuthorization: Bearer eyJ...
+#1.bearer_reader 拆出jwt
+#2.get_current_user 拆出jwt手上的sub 拿user
+#3.get_current_member 拿member
+#4.require_party_leader 拿某队队长
+#5._leader_member 真正路由里干活用的 有这个就说明之前都过
+def require_leader(
+    party_id: int,
+    #这个fastapi自动帮你从路由路径里找 
+    #那里第一次出现请求的party_id
+    current_member: models.PartyMember = Depends(get_current_member),
+) -> models.PartyMember:
+    if not current_member.is_leader:
+        raise HTTPException(
+            status_code=403,#403 Forbidden  
+            #身份是真的，但没资格办这件事
+            detail="需要队长权限",
+        )
+
+    if current_member.party_id != party_id:
+        raise HTTPException(
+            status_code=403,
+            detail="不是这个小队",
+        )
+    return current_member

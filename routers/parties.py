@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
-from auth import require_admin
+from auth import require_admin,require_leader
 
 
 router = APIRouter(
@@ -20,15 +20,44 @@ router = APIRouter(
 )#201 Created
 def create_party(
     party_data: schemas.PartyCreate,
+    #给我队名 队长user_id
     db: Session = Depends(get_db),
     _admin_user: models.User = Depends(require_admin),
 ):
+    #检查队长
+        #1.有这人？
+        #2.这人在其他队？
+    leader_user = db.get(
+    models.User,
+    party_data.leader_user_id,
+)
+
+    if leader_user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="初始队长用户不存在",
+        )
+
+    existing_member = db.scalar(
+    select(models.PartyMember).where(
+        models.PartyMember.user_id
+        == party_data.leader_user_id
+    )
+)
+
+    if existing_member is not None:
+        raise HTTPException(
+            status_code=409,#conflict
+            detail="该用户已经加入其他小队",
+        )
+    
+    #检查队伍
+        #1.有这名？
     existing_party = db.scalars(
         select(models.Party).where(
             models.Party.name == party_data.name
         )
     ).first()
-    #没找到不要紧 返回none就行 别惦记你那个b for循环了
 
     if existing_party is not None:
         raise HTTPException(
@@ -36,13 +65,23 @@ def create_party(
             #conflict
             detail="小队名称已存在",
         )
-
+    
     party = models.Party(
         name=party_data.name
     )
     #创建新party实例 当作行被orm进db
-
     db.add(party)
+    db.flush()
+    #→提前执行INSERT，取得party.id，但不结束事务
+    #现在就有生成的主键 party.id了
+
+    first_party_member = models.PartyMember(
+    party_id=party.id,
+    user_id=party_data.leader_user_id,
+    is_leader=True,
+    )
+    db.add(first_party_member)
+
     db.commit()
     db.refresh(party)
 
@@ -58,6 +97,7 @@ def add_party_member(
     party_id: int,
     party_member_data: schemas.PartyMemberCreate,
     db: Session = Depends(get_db),
+    _leader = Depends(require_leader)
 ):
  #1.小队id检查
     party = db.get(
@@ -172,6 +212,7 @@ def remove_party_member(
     party_id: int,
     user_id: int,
     db: Session = Depends(get_db),
+    _leader = Depends(require_leader)
 ):
     party_member = db.scalars(
         select(models.PartyMember).where(
@@ -197,6 +238,7 @@ def remove_party_member(
 def delete_party(
     party_id: int,
     db: Session = Depends(get_db),
+    _leader = Depends(require_leader),
 ):  
     party = db. get(models.Party,
                     party_id,
@@ -220,6 +262,7 @@ def change_party_leader(
     party_id: int,
     leader_data: schemas.LeaderUpdate,
     db: Session = Depends(get_db),
+    _leader = Depends(require_leader),
 ):
     party = db.get(
         models.Party,

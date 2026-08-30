@@ -170,7 +170,7 @@ def test_update_quest():
     assert data["category_id"] == new_category_id
 
 
-def test_update_quest_requires_admin():
+def test_update_quest_requires_admin_403():
     db = TestSessionLocal()
     category = create_category(db, name="update_permission_category")
     quest = create_quest(
@@ -253,7 +253,7 @@ def test_delete_quest():
     assert check_response.json() == {"detail": "任务不存在"}
 
 
-def test_delete_quest_requires_admin():
+def test_delete_quest_requires_admin_403():
     db = TestSessionLocal()
     category = create_category(db, name="delete_permission_category")
     quest = create_quest(db, title="ordinary_user_cannot_delete", category_id=category.id)
@@ -378,7 +378,7 @@ def test_update_quest_status_invalid_returns_400():
 
 # 四、小队参与任务功能
 
-def test_update_quest_status_requires_admin():
+def test_update_quest_status_requires_admi_403():
     db = TestSessionLocal()
     category = create_category(db, name="status_permission_category")
     quest = create_quest(

@@ -1,4 +1,5 @@
 from security import create_access_token
+import pytest
 from tests.helpers import (
     TestSessionLocal,
     add_member,
@@ -10,16 +11,30 @@ from tests.helpers import (
 )
 
 
+def create_leader_access_token(db, party_id, *, username):
+    leader = create_user(db, username=username)
+    add_member(db, party_id, leader.id, is_leader=True)
+    return create_access_token(leader.id)
+
+
 def test_party_accepts_quest():
     db = TestSessionLocal()
     category = create_category(db, name="讨伐")
     quest = create_quest(db, title="低级任务", category_id=category.id, status="open")
     party = create_party(db, name="接任务小队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="accept_quest_leader",
+    )
     quest_id = quest.id
     party_id = party.id
     db.close()
 
-    response = client.post(f"/parties/{party_id}/quests/{quest_id}")
+    response = client.post(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
 
     assert response.status_code == 201
     data = response.json()
@@ -31,26 +46,43 @@ def test_party_accepts_quest():
     assert quest_response.json()["status"] == "commenced"
 
 
-def test_accept_quest_missing_party_returns_404():
+def test_leader_cannot_accept_quest_for_another_party_returns_403():
     db = TestSessionLocal()
     category = create_category(db, name="护送")
     quest = create_quest(db, title="护送木车", category_id=category.id, status="open")
+    own_party = create_party(db, name="接任务队长自己的小队")
+    access_token = create_leader_access_token(
+        db,
+        own_party.id,
+        username="cross_party_quest_leader",
+    )
     quest_id = quest.id
     db.close()
 
-    response = client.post(f"/parties/99999/quests/{quest_id}")
+    response = client.post(
+        f"/parties/99999/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
 
-    assert response.status_code == 404
-    assert response.json() == {"detail": "小队不存在"}
+    assert response.status_code == 403
+    assert response.json() == {"detail": "不是这个小队"}
 
 
 def test_accept_quest_missing_quest_returns_404():
     db = TestSessionLocal()
     party = create_party(db, name="空任务队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="missing_quest_leader",
+    )
     party_id = party.id
     db.close()
 
-    response = client.post(f"/parties/{party_id}/quests/999999")
+    response = client.post(
+        f"/parties/{party_id}/quests/999999",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
 
     assert response.status_code == 404
     assert response.json() == {"detail": "任务不存在"}
@@ -61,12 +93,18 @@ def test_same_party_cannot_accept_same_quest_twice():
     category = create_category(db, name="讨伐")
     quest = create_quest(db, title="重复接取", category_id=category.id, status="open")
     party = create_party(db, name="重复接取队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="duplicate_accept_leader",
+    )
     party_id = party.id
     quest_id = quest.id
     db.close()
 
-    first = client.post(f"/parties/{party_id}/quests/{quest_id}")
-    second = client.post(f"/parties/{party_id}/quests/{quest_id}")
+    headers = {"Authorization": f"Bearer {access_token}"}
+    first = client.post(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
+    second = client.post(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
 
     assert first.status_code == 201
     assert second.status_code == 409
@@ -79,13 +117,21 @@ def test_non_cooperative_quest_cannot_be_accepted_by_second_party_returns_409():
     quest = create_quest(db, title="独占任务", category_id=category.id, status="open")
     party_a = create_party(db, name="A队")
     party_b = create_party(db, name="B队")
+    token_a = create_leader_access_token(db, party_a.id, username="exclusive_leader_a")
+    token_b = create_leader_access_token(db, party_b.id, username="exclusive_leader_b")
     party_a_id = party_a.id
     party_b_id = party_b.id
     quest_id = quest.id
     db.close()
 
-    first = client.post(f"/parties/{party_a_id}/quests/{quest_id}")
-    second = client.post(f"/parties/{party_b_id}/quests/{quest_id}")
+    first = client.post(
+        f"/parties/{party_a_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    second = client.post(
+        f"/parties/{party_b_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
 
     assert first.status_code == 201
     assert second.status_code == 409
@@ -98,13 +144,21 @@ def test_cooperative_quest_allows_multiple_parties():
     quest = create_quest(db, title="团队副本", category_id=category.id, status="open", is_cooperative=True)
     party_a = create_party(db, name="合作队A")
     party_b = create_party(db, name="合作队B")
+    token_a = create_leader_access_token(db, party_a.id, username="cooperative_leader_a")
+    token_b = create_leader_access_token(db, party_b.id, username="cooperative_leader_b")
     party_a_id = party_a.id
     party_b_id = party_b.id
     quest_id = quest.id
     db.close()
 
-    response_a = client.post(f"/parties/{party_a_id}/quests/{quest_id}")
-    response_b = client.post(f"/parties/{party_b_id}/quests/{quest_id}")
+    response_a = client.post(
+        f"/parties/{party_a_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    response_b = client.post(
+        f"/parties/{party_b_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
 
     assert response_a.status_code == 201
     assert response_b.status_code == 201
@@ -120,13 +174,19 @@ def test_get_party_quests():
     quest_a = create_quest(db, title="任务A", category_id=category.id, status="open")
     quest_b = create_quest(db, title="任务B", category_id=category.id, status="open")
     party = create_party(db, name="查询任务队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="query_party_quests_leader",
+    )
     party_id = party.id
     quest_a_id = quest_a.id
     quest_b_id = quest_b.id
     db.close()
 
-    client.post(f"/parties/{party_id}/quests/{quest_a_id}")
-    client.post(f"/parties/{party_id}/quests/{quest_b_id}")
+    headers = {"Authorization": f"Bearer {access_token}"}
+    client.post(f"/parties/{party_id}/quests/{quest_a_id}", headers=headers)
+    client.post(f"/parties/{party_id}/quests/{quest_b_id}", headers=headers)
 
     response = client.get(f"/parties/{party_id}/quests")
 
@@ -148,13 +208,21 @@ def test_get_quest_parties():
     )
     party_a = create_party(db, name="P1")
     party_b = create_party(db, name="P2")
+    token_a = create_leader_access_token(db, party_a.id, username="quest_parties_leader_a")
+    token_b = create_leader_access_token(db, party_b.id, username="quest_parties_leader_b")
     party_a_id = party_a.id
     party_b_id = party_b.id
     quest_id = quest.id
     db.close()
 
-    client.post(f"/parties/{party_a_id}/quests/{quest_id}")
-    client.post(f"/parties/{party_b_id}/quests/{quest_id}")
+    client.post(
+        f"/parties/{party_a_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    client.post(
+        f"/parties/{party_b_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
 
     response = client.get(f"/quests/{quest_id}/parties")
 
@@ -169,13 +237,19 @@ def test_withdraw_from_quest():
     category = create_category(db, name="采集")
     quest = create_quest(db, title="采集药材", category_id=category.id, status="open")
     party = create_party(db, name="退出队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="withdraw_quest_leader",
+    )
     quest_id = quest.id
     party_id = party.id
     db.close()
 
-    client.post(f"/parties/{party_id}/quests/{quest_id}")
+    headers = {"Authorization": f"Bearer {access_token}"}
+    client.post(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
 
-    response = client.delete(f"/parties/{party_id}/quests/{quest_id}")
+    response = client.delete(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
 
     assert response.status_code == 204
     assert response.content == b""
@@ -190,11 +264,19 @@ def test_withdraw_missing_participation_returns_404():
     category = create_category(db, name="采集")
     quest = create_quest(db, title="无参与任务", category_id=category.id, status="open")
     party = create_party(db, name="没参与队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="missing_participation_leader",
+    )
     quest_id = quest.id
     party_id = party.id
     db.close()
 
-    response = client.delete(f"/parties/{party_id}/quests/{quest_id}")
+    response = client.delete(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
 
     assert response.status_code == 404
     assert response.json() == {"detail": "该小队没有参与此任务"}
@@ -205,12 +287,18 @@ def test_last_party_withdraw_reopens_quest():
     category = create_category(db, name="讨伐")
     quest = create_quest(db, title="最终任务", category_id=category.id, status="open")
     party = create_party(db, name="最后一个队")
+    access_token = create_leader_access_token(
+        db,
+        party.id,
+        username="last_withdraw_leader",
+    )
     party_id = party.id
     quest_id = quest.id
     db.close()
 
-    client.post(f"/parties/{party_id}/quests/{quest_id}")
-    response = client.delete(f"/parties/{party_id}/quests/{quest_id}")
+    headers = {"Authorization": f"Bearer {access_token}"}
+    client.post(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
+    response = client.delete(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
 
     assert response.status_code == 204
     check_response = client.get(f"/quests/{quest_id}")
@@ -237,9 +325,13 @@ def test_party_does_quest_flow():
     )
     party_id = party.id
     quest_id = quest.id
+    leader_access_token = create_access_token(user.id)
     db.close()
 
-    accept_response = client.post(f"/parties/{party_id}/quests/{quest_id}")
+    accept_response = client.post(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {leader_access_token}"},
+    )
     assert accept_response.status_code == 201
 
     party_quests = client.get(f"/parties/{party_id}/quests")
@@ -257,3 +349,32 @@ def test_party_does_quest_flow():
     final_response = client.get(f"/quests/{quest_id}")
     assert final_response.status_code == 200
     assert final_response.json()["status"] == "finished"
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+#下面这个测试运行两次，第一次把 method 设为 "POST"，第二次设为 "DELETE"。
+def test_participation_leader_routes_without_login_return_401(method):
+    response = client.request(method, "/parties/999/quests/999")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+def test_participation_leader_routes_reject_ordinary_member_403(method):
+    db = TestSessionLocal()
+    party = create_party(db, name="普通成员不能操作参与关系")
+    ordinary_user = create_user(db, username="ordinary_participation_member")
+    add_member(db, party.id, ordinary_user.id, is_leader=False)
+    party_id = party.id
+    access_token = create_access_token(ordinary_user.id)
+    db.close()
+
+    response = client.request(
+        method,
+        f"/parties/{party_id}/quests/999",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "需要队长权限"}
