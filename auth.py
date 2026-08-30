@@ -2,14 +2,6 @@
 # 是 客户端 发 token 回来 时候才用到的 所以不写在security里
 #security只负责底层验证密码啥的
 
-#工作流：
-# 读取Authorization请求头
-# → 取出JWT
-# → 解码
-# → 取得user.id
-# → 查询数据库
-# → 返回models.User
-# → 失败时返回HTTP 401
 
 import jwt
 from fastapi import Depends, HTTPException
@@ -29,10 +21,27 @@ bearer_reader = HTTPBearer()
 #只不过是一次带规则的字符串切分。返回一个pydantic类实例
 #但携带完整类方法。
 
-#credentials.credentials
-# "eyJ..."
 
 
+
+# 客户端发来：
+# Authorization: Bearer <JWT>
+
+# bearer_reader：
+# 识别 Bearer 标记
+# → 从请求头中切出真正的 JWT
+
+# jwt.decode：
+# 用服务器密钥验签
+# → 检查算法
+# → 检查过期时间
+# → 解出 payload
+
+# 读取 payload["sub"]：
+# 得到 user.id
+# → 去数据库查 User
+# → 查到就放行
+# → 任一步不对就返回 401
 def get_current_user(
     auth_credentials: HTTPAuthorizationCredentials = Depends(
         bearer_reader
@@ -48,7 +57,7 @@ def get_current_user(
     #我期待最后返回一个user实例
 
     credentials_exception = HTTPException(
-        status_code=401,
+        status_code=401,#unauthorized 身份都是假的
         detail="身份凭证无效",
         headers={
             "WWW-Authenticate": "Bearer",
@@ -93,3 +102,16 @@ def get_current_user(
         raise credentials_exception
 
     return user
+
+
+def require_admin(
+    current_user: models.User = Depends(get_current_user),
+) -> models.User:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,#403 Forbidden  
+            #身份是真的，但没资格办这件事
+            detail="需要管理员权限",
+        )
+
+    return current_user

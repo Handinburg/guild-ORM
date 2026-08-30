@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
+from auth import require_admin
 
 
 router = APIRouter(
@@ -20,6 +21,7 @@ router = APIRouter(
 def create_party(
     party_data: schemas.PartyCreate,
     db: Session = Depends(get_db),
+    _admin_user: models.User = Depends(require_admin),
 ):
     existing_party = db.scalars(
         select(models.Party).where(

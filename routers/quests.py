@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
+from auth import require_admin
 
 
 router = APIRouter(
@@ -18,24 +19,23 @@ router = APIRouter(
     status_code=201,
 )
 def create_quest(
-    # FastAPI读取请求JSON，
-    # Pydantic校验后创建QuestCreate对象
-    #1.Pydantic将json变为 QuestCreate 对象 对象名 quest_data 用于校验请求数据
+    # JSON→QuestCreate对象
     quest_data: schemas.QuestCreate,
-
-        # FastAPI通过get_db取得SQLAlchemy Session对象db
     db: Session = Depends(get_db),
+    _admin_user: models.User = Depends(require_admin),
+    #_表示这个参数必须存在，但我故意不在函数体里读取它，
+    # 程序员的约定写法。我只需要执行依赖
 ):
-        #  db对象呼出get()方法按照主键查询数据库  这步只是为了防止请求数据库里不存在的类别
-         # 语法为db.get(ORM模型, 主键值) 类似SQLAlchemy里的raw sql
+
+    
     category = db.get(
         models.QuestCategory,
         quest_data.category_id,
     )
 
-                 # category的结果：
-                    # 找到    → QuestCategory ORM对象
-                    # 找不到  → None
+    # category的结果：
+        # 找到    → QuestCategory ORM对象
+        # 找不到  → None
     if category is None:
         raise HTTPException(
             status_code=404,
@@ -207,6 +207,7 @@ def update_quest(
     quest_id: int,
     quest_data: schemas.QuestUpdate,
     db: Session = Depends(get_db),
+    _admin_user: models.User = Depends(require_admin),
 ):
 #注意到要求输入 quest_id: int,quest_data: schemas.QuestUpdate,
     #db由Depends(get_db)自动提供
@@ -267,6 +268,7 @@ def update_quest(
 def delete_quest(
     quest_id: int,
     db: Session = Depends(get_db),
+    _admin_user: models.User = Depends(require_admin),
 ):
     quest = db.get(models.Quest, quest_id)
 
@@ -286,7 +288,7 @@ def delete_quest(
     # 删除成功：204 No Content + 不返回正文 所以这里不用写response model
 
 
-#admin用 手动改任务status
+#admin用 手动推进status
 @router.patch(
     "/quests/{quest_id}/status",
     response_model=schemas.QuestResponse,
@@ -295,6 +297,7 @@ def update_quest_status(
     quest_id: int,
     status_data: schemas.QuestStatusUpdate,
     db: Session = Depends(get_db),
+    _admin_user: models.User = Depends(require_admin),
 ):
     quest = db.get(models.Quest, quest_id)
 
@@ -304,6 +307,7 @@ def update_quest_status(
             detail="任务不存在",
         )
 
+    #需解耦
     allowed_status_set = {
         "open",
         "commenced",
