@@ -235,10 +235,15 @@ def test_delete_quest():
     db = TestSessionLocal()
     category = create_category(db, name="清理")
     quest = create_quest(db, title="清理洞穴", category_id=category.id)
+    admin_user = create_user(db, username="delete_quest_admin", is_admin=True)
     quest_id = quest.id
+    access_token = create_access_token(admin_user.id)
     db.close()
 
-    response = client.delete(f"/quests/{quest_id}")
+    response = client.delete(
+        f"/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
 
     assert response.status_code == 204
     assert response.content == b""
@@ -246,6 +251,49 @@ def test_delete_quest():
     check_response = client.get(f"/quests/{quest_id}")
     assert check_response.status_code == 404
     assert check_response.json() == {"detail": "任务不存在"}
+
+
+def test_delete_quest_requires_admin():
+    db = TestSessionLocal()
+    category = create_category(db, name="delete_permission_category")
+    quest = create_quest(db, title="ordinary_user_cannot_delete", category_id=category.id)
+    normal_user = create_user(db, username="normal_quest_deleter")
+    quest_id = quest.id
+    access_token = create_access_token(normal_user.id)
+    db.close()
+
+    response = client.delete(
+        f"/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "需要管理员权限"}
+
+    db = TestSessionLocal()
+    quest = db.get(models.Quest, quest_id)
+
+    assert quest is not None
+    db.close()
+
+
+def test_delete_quest_without_login_returns_401():
+    db = TestSessionLocal()
+    category = create_category(db, name="delete_without_login_category")
+    quest = create_quest(db, title="login_required_to_delete", category_id=category.id)
+    quest_id = quest.id
+    db.close()
+
+    response = client.delete(f"/quests/{quest_id}")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+    db = TestSessionLocal()
+    quest = db.get(models.Quest, quest_id)
+
+    assert quest is not None
+    db.close()
 
 
 def test_filter_quests_by_status():

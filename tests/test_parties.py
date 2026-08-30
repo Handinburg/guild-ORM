@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 import models
+from security import create_access_token
 from tests.helpers import (
     TestSessionLocal,
     add_member,
@@ -21,9 +22,15 @@ def test_get_missing_party_returns_404():
 
 
 def test_create_party_returns_201_and_checks_data():
+    db = TestSessionLocal()
+    admin_user = create_user(db, username="create_party_admin", is_admin=True)
+    access_token = create_access_token(admin_user.id)
+    db.close()
+
     response = client.post(
         "/parties",
         json={"name": "自动测试小队"},
+        headers={"Authorization": f"Bearer {access_token}"},
     )
 
     assert response.status_code == 201
@@ -37,15 +44,64 @@ def test_create_duplicate_party_returns_409():
 #先给db里加一条 100%成功 不需返回201
     db = TestSessionLocal()
     create_party(db, name="银丝鸟")
+    admin_user = create_user(db, username="duplicate_party_admin", is_admin=True)
+    access_token = create_access_token(admin_user.id)
     db.close()
 #在真正测试我们想要的409
     response = client.post(
         "/parties",
         json={"name": "银丝鸟"},
+        headers={"Authorization": f"Bearer {access_token}"},
     )
 
     assert response.status_code == 409
     assert response.json() == {"detail": "小队名称已存在"}
+
+
+def test_create_party_requires_admin():
+    db = TestSessionLocal()
+    normal_user = create_user(db, username="normal_party_creator")
+    access_token = create_access_token(normal_user.id)
+    db.close()
+
+    response = client.post(
+        "/parties",
+        json={"name": "普通用户不能创建的小队"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "需要管理员权限"}
+
+    db = TestSessionLocal()
+    party = db.scalar(
+        select(models.Party).where(
+            models.Party.name == "普通用户不能创建的小队"
+        )
+    )
+
+    assert party is None
+    db.close()
+
+
+def test_create_party_without_login_returns_401():
+    response = client.post(
+        "/parties",
+        json={"name": "未登录不能创建的小队"},
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+    db = TestSessionLocal()
+    party = db.scalar(
+        select(models.Party).where(
+            models.Party.name == "未登录不能创建的小队"
+        )
+    )
+
+    assert party is None
+    db.close()
 
 
 def test_get_party_returns_members():
