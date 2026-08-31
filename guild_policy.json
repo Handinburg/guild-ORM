@@ -1,0 +1,9 @@
+
+{
+  "quest": {
+    "max_active_per_party": 3
+  },
+  "party": {
+
+  }
+}

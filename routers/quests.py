@@ -205,13 +205,15 @@ def get_quests(
 )
 def update_quest(
     quest_id: int,
+    #target
     quest_data: schemas.QuestUpdate,
+    #payload
     db: Session = Depends(get_db),
     _admin_user: models.User = Depends(require_admin),
+    #authorization
 ):
-#注意到要求输入 quest_id: int,quest_data: schemas.QuestUpdate,
-    #db由Depends(get_db)自动提供
-    #db handle呼出.get(models.Quest, quest_id) 按id查表 如未查到返回404
+
+    #有这任务？
     quest = db.get(models.Quest, quest_id)
 
     if quest is None:
@@ -225,7 +227,7 @@ def update_quest(
     update_data = quest_data.model_dump(
         exclude_unset=True
     )
-#如果还要改 categoryid的 检测下是否在QuestCategory表里
+    #有这cate？
     if "category_id" in update_data:
         category = db.get(
             models.QuestCategory,
@@ -263,7 +265,7 @@ def update_quest(
 #删quest
 @router.delete(
     "/quests/{quest_id}",
-    status_code=204,
+    status_code=204,# No Content
 )
 def delete_quest(
     quest_id: int,
@@ -281,10 +283,7 @@ def delete_quest(
     db.delete(quest)
     db.commit()
 
-#行业惯例： 
     # 创建成功：201 Created + 返回创建后的资源
-    # 查询成功：200 OK + 返回资源
-    # 更新成功：200 OK + 返回更新后的资源
     # 删除成功：204 No Content + 不返回正文 所以这里不用写response model
 
 
@@ -307,7 +306,7 @@ def update_quest_status(
             detail="任务不存在",
         )
 
-    #需解耦
+    #需解耦 check_allowed_status_set
     allowed_status_set = {
         "open",
         "commenced",

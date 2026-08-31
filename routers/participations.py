@@ -6,6 +6,8 @@ import models
 import schemas
 from database import get_db
 from auth import require_leader
+from guild_policy_executor import check_active_quest_limit
+
 
 
 router = APIRouter(
@@ -23,6 +25,7 @@ def accept_quest(
     quest_id: int,
     db: Session = Depends(get_db),
     _leader = Depends(require_leader),
+    _active_quest_limit: None = Depends(check_active_quest_limit)
 ):
     party = db.get(models.Party, party_id)
 
@@ -71,20 +74,6 @@ def accept_quest(
             status_code=409,
             detail="该任务目前不开放",
         )
-    # #此为外界规则 需要解耦
-    # existing_participation_list = db.scalars(
-    #     select(models.Participation).where(
-    #         models.Participation.party_id == party_id,
-    #     )
-    # ).all()
-
-    # #此为外界规则 需要解耦
-    # if len(existing_participation_list) >= 3:
-    #     raise HTTPException(
-    #         status_code=409,
-    #         detail="每个小队不得接受超过3个任务",
-    #     )
-
 
 #别看花眼 这个是创建类实例
     participation = models.Participation(

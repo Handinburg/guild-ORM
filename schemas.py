@@ -6,7 +6,7 @@ class QuestCreate(BaseModel):
     description: str
     completion_criteria: str
     category_id: int
-
+    is_cooperative:bool = False
 
 class QuestResponse(BaseModel):
     id: int
@@ -15,6 +15,7 @@ class QuestResponse(BaseModel):
     completion_criteria: str
     status: str
     category_id: int
+    is_cooperative: bool
 
     model_config = ConfigDict(from_attributes=True)
     #from_attributes=True允许 Pydantic这样读取：
@@ -27,6 +28,7 @@ class QuestUpdate(BaseModel):
     description: str | None = None
     completion_criteria: str | None = None
     category_id: int | None = None
+    is_cooperative:bool | None = None
 
 
 class PartyCreate(BaseModel):
