@@ -96,7 +96,7 @@ def test_create_party_requires_admin_403():
     response = client.post(
         "/parties",
         json={
-            "name": "普通用户不能创建的小队",
+            "name": "普通小队",
             "leader_user_id": leader_user_id,
         },
         headers={"Authorization": f"Bearer {access_token}"},
@@ -108,7 +108,7 @@ def test_create_party_requires_admin_403():
     db = TestSessionLocal()
     party = db.scalar(
         select(models.Party).where(
-            models.Party.name == "普通用户不能创建的小队"
+            models.Party.name == "普通小队"
         )
     )
 

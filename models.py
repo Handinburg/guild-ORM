@@ -1,8 +1,19 @@
 from sqlalchemy import Integer, String,Boolean, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
+from enum import Enum
+
 class Base(DeclarativeBase):
     pass
 
+class AdventurerRank(str, Enum):
+    COPPER = "copper"
+    IRON = "iron"
+    SILVER = "silver"
+    GOLD = "gold"
+    PLATINUM = "platinum"
+    MITHRIL = "mithril"
+    ORICHALCUM = "orichalcum"
+    ADAMANTITE = "adamantite"
 
 class Character(Base):
     __tablename__ = "characters"
@@ -38,6 +49,12 @@ class Quest(Base):
     description: Mapped[str] = mapped_column(String)
     completion_criteria: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="open")
+
+    minimum_rank: Mapped[str] = mapped_column(
+    String,
+    default=AdventurerRank.COPPER.value,
+    nullable=False,
+)
 
     category_id: Mapped[int] = mapped_column(
         Integer,
@@ -161,6 +178,7 @@ class Participation(Base):
         back_populates="participation_list",
     )
 
+
 class User(Base):
     __tablename__ = "users"
 
@@ -191,3 +209,10 @@ class User(Base):
         default=False,
         nullable=False,
     )
+
+    adventurer_rank: Mapped[str] = mapped_column(
+    String,
+    default=AdventurerRank.COPPER.value,
+    nullable=False,
+    )   
+

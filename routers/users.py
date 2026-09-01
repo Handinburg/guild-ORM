@@ -4,9 +4,12 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
+
 from database import get_db
 from security import hash_password, verify_password,create_access_token
 from auth import get_current_user
+from guild_policy_executor import check_user_registration_policy
+
 
 
 router = APIRouter(
@@ -20,7 +23,10 @@ router = APIRouter(
     status_code=201,
 )
 def register_user(
-    user_data: schemas.UserRegister,
+    user_data: schemas.UserRegister = Depends(
+    check_user_registration_policy
+    ),
+    #这句 既接受了用户发的 又完成政策校验
     db: Session = Depends(get_db),
 ):
     existing_user = db.scalar(

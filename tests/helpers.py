@@ -61,9 +61,9 @@ def create_character(db, name="测试角色", race="人类", level=1):
 #为什么要return 养成习惯 新建对象习惯拿他的新id（refresh）
 # 之前是（character_id = cursor.lastrowid）之类的 用于后续测试
 
-def create_user(db,username = "testuser123",
+def create_user(db,username = "testuser",
                 #这些是默认值
-                adventurer_name="test_adventurer_name",
+                adventurer_name="测试冒险者",
                 password_hash="test_password_hash",
                 is_admin = False
                 ):

@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
+
 from database import get_db
 from auth import require_admin,require_leader
-
+from guild_policy_executor import check_party_creation_policy
 
 router = APIRouter(
     tags=["parties"],
@@ -19,8 +20,9 @@ router = APIRouter(
     status_code=201,
 )#201 Created
 def create_party(
-    party_data: schemas.PartyCreate,
-    #给我队名 队长user_id
+    party_data: schemas.PartyCreate=Depends(
+        check_party_creation_policy),
+    #接受数据 并进行政策检验
     db: Session = Depends(get_db),
     _admin_user: models.User = Depends(require_admin),
 ):

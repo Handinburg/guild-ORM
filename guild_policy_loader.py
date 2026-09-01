@@ -10,14 +10,29 @@ from pydantic import BaseModel, Field
 class QuestPolicy(BaseModel):
     max_active_per_party: int = Field(
         ge=1,
+        #工会允许调整任务上限，
+        # 但不能制定“任何小队一个任务都不准接”的非法政策。
     )
 
 class PartyPolicy(BaseModel):
-    pass
+    max_name_length : int = Field(
+            ge=1,
+        )
+    forbidden_name_parts :list
+
+class UserPolicy(BaseModel):
+    max_username_length : int = Field(
+        ge=1,
+    )
+    max_adventurer_name_length : int = Field(
+        ge=1,
+    )
+    forbidden_name_parts :list
 
 class GuildPolicy(BaseModel):
     quest: QuestPolicy
     party: PartyPolicy
+    user: UserPolicy
 
 
 POLICY_FILE = Path(__file__).with_name(
@@ -35,12 +50,15 @@ def load_guild_policy() -> GuildPolicy:
 
     return GuildPolicy.model_validate(
         policy_data
-        #→ GuildPolicy对象
+        #把这份普通字典交给 GuildPolicy 类检查，
+        # 并制造一个符合要求的 GuildPolicy 实例
+        #→ GuildPolicy
     )
 
 
 CURRENT_POLICY = load_guild_policy()
-
+#只在模块首次导入时执行一次。
+# 因此修改 JSON 后，要重启程序，才会重新加载政策。
 
 def get_current_policy() -> GuildPolicy:
     return CURRENT_POLICY

@@ -4,6 +4,24 @@
     "max_active_per_party": 3
   },
   "party": {
-
+    "max_name_length": 10,
+    "forbidden_name_parts":[
+      "admin",
+      "管理员",
+      "dummy脏话",
+      "dummy敏感话题",
+      "dummy敏感数字"
+    ]
+  },
+  "user" : {
+    "max_username_length": 10,
+    "max_adventurer_name_length":10,
+    "forbidden_name_parts":[
+      "admin",
+      "管理员",
+      "dummy脏话",
+      "dummy敏感话题",
+      "dummy敏感数字"
+    ]
   }
 }

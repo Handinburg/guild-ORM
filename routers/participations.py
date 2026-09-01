@@ -6,7 +6,7 @@ import models
 import schemas
 from database import get_db
 from auth import require_leader
-from guild_policy_executor import check_active_quest_limit
+from guild_policy_executor import check_accept_quest_policy
 
 
 
@@ -25,7 +25,7 @@ def accept_quest(
     quest_id: int,
     db: Session = Depends(get_db),
     _leader = Depends(require_leader),
-    _active_quest_limit: None = Depends(check_active_quest_limit)
+    _active_quest_limit: None = Depends(check_accept_quest_policy)
 ):
     party = db.get(models.Party, party_id)
 
