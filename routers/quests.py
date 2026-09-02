@@ -23,19 +23,13 @@ def create_quest(
     quest_data: schemas.QuestCreate,
     db: Session = Depends(get_db),
     _admin_user: models.User = Depends(require_admin),
-    #_表示这个参数必须存在，但我故意不在函数体里读取它，
-    # 程序员的约定写法。我只需要执行依赖
+    #_表示这个参数必须存在，但我故意不在函数体里读取它
 ):
 
-    
     category = db.get(
         models.QuestCategory,
         quest_data.category_id,
     )
-
-    # category的结果：
-        # 找到    → QuestCategory ORM对象
-        # 找不到  → None
     if category is None:
         raise HTTPException(
             status_code=404,
@@ -44,12 +38,6 @@ def create_quest(
 
 #model_dump()把 Pydantic对象转换成普通字典对象data，用于临时传递字段
 #quest_data 作为Pydantic对象 自带model_dump()方法
-    # {
-    #     "title": "清除哥布林",
-    #     "description": "村庄附近出现了哥布林",
-    #     "completion_criteria": "消灭5只哥布林",
-    #     "category_id": 1,
-    # }
     data = quest_data.model_dump()
 
 #**data表示 “拆开这个字典，把冒号都换成等号”
@@ -82,9 +70,6 @@ def create_quest(
 
 #根据 quest 的主键，重新从数据库查询这一行，
 # 并用数据库里的最新数据刷新当前 quest 对象。
-#数据库插入后，可能补充：
-#id = 2
-#status = open
 
     db.refresh(quest)
     #此时仍拿到 quest类
@@ -229,7 +214,7 @@ def update_quest(
         exclude_none=True,
         #保护 不把”None“ ”null“当成patch提交给数据库
     )
-    #有这cate？
+    #cate ect'?
     if "category_id" in update_data:
         category = db.get(
             models.QuestCategory,
@@ -241,14 +226,12 @@ def update_quest(
                 status_code=404,
                 detail="任务类别不存在",
             )
-# 遍历字典中的字段和值。
+        
+#rabotat'
     for field, value in update_data.items():
     #python自带函数：setattr(对象, "属性名", 值)
     #用于动态修改对象属性
         setattr(quest, field, value)
-
-# SQLAlchemy发现quest属性发生变化，
-# 自动生成并执行UPDATE，然后提交事务。
     db.commit()
 #改，传 拿改后的的quest类实例
 #经过pydantic检测
@@ -301,25 +284,9 @@ def update_quest_status(
             status_code=404,
             detail="任务不存在",
         )
-
-    #需解耦 check_allowed_status_set
-    allowed_status_set = {
-        "open",
-        "commenced",
-        "finished",
-        "failed",
-        "canceled",
-    }
-
-    if status_data.status not in allowed_status_set:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "请重新规范输入status 参考管理员手册",
-            ),
-        )
-
-    quest.status = status_data.status
+    
+    quest.status = status_data.status.value
+    #与database交接得转换
 
     db.commit()
     db.refresh(quest)

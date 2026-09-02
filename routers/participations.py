@@ -25,10 +25,10 @@ def accept_quest(
     quest_id: int,
     db: Session = Depends(get_db),
     _leader = Depends(require_leader),
-    _active_quest_limit: None = Depends(check_accept_quest_policy)
+    _policy: None = Depends(check_accept_quest_policy)
 ):
     party = db.get(models.Party, party_id)
-
+    #有这队？
     if party is None:
         raise HTTPException(
             status_code=404,
@@ -36,19 +36,19 @@ def accept_quest(
         )
 
     quest = db.get(models.Quest, quest_id)
-
+    #有着任务？
     if quest is None:
         raise HTTPException(
             status_code=404,
             detail="任务不存在",
         )
-
-    existing_participation = db.scalars(
-        select(models.Participation).where(
-            models.Participation.party_id == party_id,
-            models.Participation.quest_id == quest_id,
-        )
-    ).first()
+    #你重复接取了吗？
+    existing_participation = db.scalar(
+    select(models.Participation).where(
+        models.Participation.party_id == party_id,
+        models.Participation.quest_id == quest_id,
+    )
+)
 
     if existing_participation is not None:
         raise HTTPException(
@@ -56,23 +56,18 @@ def accept_quest(
             detail="该小队已经接受过此任务",
         )
 
-    if not quest.is_cooperative:
-        other_participation = db.scalars(
-            select(models.Participation).where(
-                models.Participation.quest_id == quest_id,
-            )
-        ).first()
+    #status？
+    quest_status = models.QuestStatus(quest.status)
+    #字符串→ Enum 实例 
+    #quest.status：从数据库里拿出来的str 所以需要转换
 
-        if other_participation is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="该任务已经被其他小队接受",
-            )
-
-    if quest.status != "open":
+    if (
+        quest_status
+        != models.QuestStatus.RECRUITING
+    ):
         raise HTTPException(
             status_code=409,
-            detail="该任务目前不开放",
+            detail="该任务当前不能接取",
         )
 
     #检测等级
@@ -114,10 +109,6 @@ def accept_quest(
     )
 
     db.add(participation)
-
-    if not quest.is_cooperative:
-        quest.status = "commenced"
-
     db.commit()
     db.refresh(participation)
 
@@ -192,7 +183,7 @@ def get_quest_parties(
     return party_list
 
 
-#我不干了接口
+#withdraw from quest
 @router.delete(
     "/parties/{party_id}/quests/{quest_id}",
     status_code=204,
@@ -204,13 +195,13 @@ def withdraw_from_quest(
     _leader = Depends(require_leader),
 ):
     quest = db.get(models.Quest, quest_id)
-
+    #quest ect'?
     if quest is None:
         raise HTTPException(
             status_code=404,
             detail="任务不存在",
         )
-
+    #parici ect'?
     participation = db.scalars(
         select(models.Participation).where(
             models.Participation.party_id == party_id,
@@ -224,25 +215,16 @@ def withdraw_from_quest(
             detail="该小队没有参与此任务",
         )
 
-    if quest.status not in {
-        "open",
-        "commenced",
-    }:
+    #quest zhit'?
+    quest_status = models.QuestStatus(quest.status)
+
+    if quest_status in models.QUEST_DEAD_STATUSES:
         raise HTTPException(
             status_code=409,
             detail="已经结束的任务不能退出",
         )
 
-    other_participation = db.scalars(
-        select(models.Participation).where(
-            models.Participation.quest_id == quest_id,
-            models.Participation.party_id != party_id,
-        )
-    ).first()
-
+    #rabotat'
     db.delete(participation)
-
-    if other_participation is None:
-        quest.status = "open"
 
     db.commit()

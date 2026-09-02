@@ -1,3 +1,5 @@
+import pytest
+
 import models
 from security import create_access_token
 from tests.helpers import (
@@ -52,7 +54,14 @@ def test_create_quest_returns_201():
     data = response.json()
     assert data["title"] == "讨伐哥布林"
     assert data["category_id"] == category_id
-    assert data["status"] == "open"
+    assert data["status"] == "recruiting"
+
+    db = TestSessionLocal()
+    quest = db.get(models.Quest, data["id"])
+
+    assert quest is not None
+    assert quest.status == "recruiting"
+    db.close()
 
 
 def test_create_quest_with_missing_category_returns_404():
@@ -304,7 +313,7 @@ def test_delete_quest_without_login_returns_401():
 def test_filter_quests_by_status():
     db = TestSessionLocal()
     category = create_category(db, name="讨伐")
-    create_quest(db, title="A", category_id=category.id, status="open")
+    create_quest(db, title="A", category_id=category.id, status="recruiting")
     create_quest(db, title="B", category_id=category.id, status="commenced")
     create_quest(db, title="C", category_id=category.id, status="commenced")
     db.close()
@@ -335,114 +344,176 @@ def test_filter_quests_by_category_name():
     assert {item["title"] for item in data} == {"讨伐怪物", "再次讨伐"}
 
 
-def test_update_quest_status_manually():
-    db = TestSessionLocal()
-    category = create_category(db, name="调查")
-    quest = create_quest(db, title="调查遗迹", category_id=category.id, status="open")
-    quest_id = quest.id
-
-    admin_user = create_user(db,is_admin=True)
-    access_token = create_access_token(admin_user.id)
-
-    db.close()
-
-    response = client.patch(
-        f"/quests/{quest_id}/status",
-        json={"status": "finished"
-        },
-        headers={"Authorization": f"Bearer {access_token}"
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "finished"
-
-
-def test_update_quest_status_invalid_returns_400():
-    db = TestSessionLocal()
-    category = create_category(db, name="护送")
-    quest = create_quest(db, title="护送老人", category_id=category.id, status="open")
-    quest_id = quest.id
-
-    admin_user = create_user(db,is_admin=True)
-    access_token = create_access_token(admin_user.id)
-    
-    db.close()
-
-    response = client.patch(
-        f"/quests/{quest_id}/status",
-        json={"status": "not_real"
-        },
-        headers={"Authorization": f"Bearer {access_token}"
-        },
-    )
-
-    assert response.status_code == 400
-    assert response.json() == {"detail": ["请重新规范输入status 参考管理员手册"]}
-
-
-# 四、小队参与任务功能
-
-def test_update_quest_status_requires_admi_403():
-    db = TestSessionLocal()
-    category = create_category(db, name="status_permission_category")
-    quest = create_quest(
-        db,
-        title="status_permission_quest",
-        category_id=category.id,
-        status="open",
-    )
-    normal_user = create_user(db, username="normal_status_editor")
-    quest_id = quest.id
-    access_token = create_access_token(normal_user.id)
-    db.close()
-
-    response = client.patch(
-        f"/quests/{quest_id}/status",
-        json={"status": "finished"},
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-
-    assert response.status_code == 403
-    assert response.json() == {"detail": "需要管理员权限"}
-
-    db = TestSessionLocal()
-    quest = db.get(
-    models.Quest,
-    quest_id,
+@pytest.mark.parametrize(
+    "target_status",
+    [status.value for status in models.QuestStatus],
 )
-
-    assert quest is not None
-    assert quest.status == "open"
-    db.close()
-
-
-def test_update_quest_status_without_login_returns_401():
+def test_admin_can_update_quest_to_every_legal_status(target_status):
     db = TestSessionLocal()
-    category = create_category(db, name="status_without_login_category")
-    quest = create_quest(
-        db,
-        title="login_required_for_status",
+    category = create_category(db, name="状态名册")
+    quest = models.Quest(
+        title="状态测试任务",
+        description="测试描述",
+        completion_criteria="测试完成条件",
         category_id=category.id,
-        status="open",
+        status=models.QuestStatus.RECRUITING.value,
+        minimum_rank=models.AdventurerRank.COPPER.value,
     )
+    admin_user = create_user(db, username="statusboss", is_admin=True)
+    db.add(quest)
+    db.commit()
+    db.refresh(quest)
     quest_id = quest.id
+    headers = authorization_headers(admin_user.id)
     db.close()
 
     response = client.patch(
         f"/quests/{quest_id}/status",
+        json={"status": target_status},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["status"] == target_status
+
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+
+    assert stored_quest is not None
+    assert stored_quest.status == target_status
+    assert isinstance(stored_quest.status, str)
+    db.close()
+
+
+def test_admin_can_jump_from_finished_back_to_recruiting():
+    db = TestSessionLocal()
+    category = create_category(db, name="任意跳转")
+    quest = models.Quest(
+        title="已完成任务",
+        description="测试描述",
+        completion_criteria="测试完成条件",
+        category_id=category.id,
+        status=models.QuestStatus.FINISHED.value,
+        minimum_rank=models.AdventurerRank.COPPER.value,
+    )
+    admin_user = create_user(db, username="jumpboss", is_admin=True)
+    db.add(quest)
+    db.commit()
+    db.refresh(quest)
+    quest_id = quest.id
+    headers = authorization_headers(admin_user.id)
+    db.close()
+
+    response = client.patch(
+        f"/quests/{quest_id}/status",
+        json={"status": "recruiting"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["status"] == "recruiting"
+
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+
+    assert stored_quest is not None
+    assert stored_quest.status == "recruiting"
+    db.close()
+
+
+def test_update_quest_status_invalid_returns_422_without_mutating_database():
+    db = TestSessionLocal()
+    category = create_category(db, name="非法状态")
+    quest = models.Quest(
+        title="不能改坏的任务",
+        description="测试描述",
+        completion_criteria="测试完成条件",
+        category_id=category.id,
+        status=models.QuestStatus.POSTPONED.value,
+        minimum_rank=models.AdventurerRank.COPPER.value,
+    )
+    admin_user = create_user(db, username="invalidboss", is_admin=True)
+    db.add(quest)
+    db.commit()
+    db.refresh(quest)
+    quest_id = quest.id
+    headers = authorization_headers(admin_user.id)
+    db.close()
+
+    response = client.patch(
+        f"/quests/{quest_id}/status",
+        json={"status": "status_invalid"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+
+    assert stored_quest is not None
+    assert stored_quest.status == "postponed"
+    db.close()
+
+
+def test_update_quest_status_without_login_returns_401_before_404():
+    response = client.patch(
+        "/quests/999999/status",
         json={"status": "finished"},
     )
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
 
-    db = TestSessionLocal()
-    quest = db.get(models.Quest, quest_id)
 
-    assert quest is not None
-    assert quest.status == "open"
+def test_update_quest_status_requires_admin_403_before_404():
+    db = TestSessionLocal()
+    normal_user = create_user(db, username="statusnormal")
+    headers = authorization_headers(normal_user.id)
     db.close()
+
+    response = client.patch(
+        "/quests/999999/status",
+        json={"status": "finished"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "需要管理员权限"}
+
+
+def test_update_missing_quest_status_returns_404_for_admin():
+    db = TestSessionLocal()
+    admin_user = create_user(db, username="missingboss", is_admin=True)
+    headers = authorization_headers(admin_user.id)
+    db.close()
+
+    response = client.patch(
+        "/quests/999999/status",
+        json={"status": "finished"},
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "任务不存在"}
+
+
+def test_quest_status_groups_are_disjoint_and_cover_the_enum():
+    assert models.QUEST_ALIVE_STATUSES == {
+        models.QuestStatus.RECRUITING,
+        models.QuestStatus.COMMENCED,
+        models.QuestStatus.POSTPONED,
+    }
+    assert models.QUEST_DEAD_STATUSES == {
+        models.QuestStatus.FINISHED,
+        models.QuestStatus.CANCELED,
+        models.QuestStatus.FAILED,
+    }
+    assert models.QUEST_ALIVE_STATUSES.isdisjoint(models.QUEST_DEAD_STATUSES)
+    assert (
+        models.QUEST_ALIVE_STATUSES | models.QUEST_DEAD_STATUSES
+        == set(models.QuestStatus)
+    )
 
 
 # 任务最低等级
@@ -565,7 +636,7 @@ def test_update_quest_rejects_invalid_minimum_rank_without_mutating_database():
         db,
         title="不能改坏的任务",
         category_id=category.id,
-        minimum_rank="iron",
+        minimum_rank=models.AdventurerRank.IRON,
     )
     admin = create_user(db, username="badquest", is_admin=True)
     quest_id = quest.id

@@ -98,8 +98,7 @@ def create_quest(
     description="测试描述",
     completion_criteria="测试完成条件",
     category_id,
-    status="open",
-    is_cooperative=False,
+    status=models.QuestStatus.RECRUITING.value,
     minimum_rank=models.AdventurerRank.COPPER,
 ):
     quest = models.Quest(
@@ -108,7 +107,6 @@ def create_quest(
         completion_criteria=completion_criteria,
         category_id=category_id,
         status=status,
-        is_cooperative=is_cooperative,
         minimum_rank=minimum_rank,
     )
     db.add(quest)

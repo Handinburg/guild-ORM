@@ -15,15 +15,19 @@
 接取（party_leader）
 提交（party_leader）?未做
 审核结果(admin)？
-任务状态：open → recuiting? commenced → (submitted)?
+任务状态：recuiting? commenced → (submitted)?
     finished → canceled → failed
 
-后端
+         正在招募、正在执行、暂缓
+        → 可以退出，只删除Participation
+
+        已经完成、取消、失败
+        → 不允许退出，保留Participation用于closed查询
 
 
 # todo
 
-- ## [x] policies一期:
+- ## [x] policies一期:外挂 尽量解耦便于调整
 
 - [x] user regis政策
 - [x] participate政策
@@ -79,13 +83,26 @@
                 if max (now.. ) < minimum_rank:
                         raise...
 
-## -[] 其余业务补全
-- []用户查看自己小队和自己的任务。分：
+##  -[]用户查看自己小队和自己的任务。分：
         正执行的（recuiting commenced）
         已完成的（finished）
         失败的（withdraw failed 都写failed吧）
-- []合作任务很烦啊
-        recuiting状态增加 为了给 pariticipation表过滤目前正执行的
+
+- [x] get my party 暂时不做履历
+- [] get my quest all(status = * 包括withdraw failed finished open commenced）
+        只设置 正常：recruiting→commenced→finished  
+                异常：canceled、posponed、failed、
+        多个小队 本来就可以接一个任务 只要任务是 open→accepted（或recruiting？）状态 
+        真的打算一个队做的任务 就直接要求前台commenced
+        去掉 is_cooperative 字段 
+        管理员手动commence后 就不在开放接取
+
+        管理员的修改 可以跳 不设顺序限制
+- [] v2：历史记录 包含withdrawn动作留痕
+- [] v2: 加admin审核accept quest接口
+- [] v2: admin create_quest 暂存功能
+
+
 
 - [x]任务完成度 评分 不做了 管理员手动
 - [x]招聘模块 add member不就是吗

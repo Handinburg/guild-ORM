@@ -146,3 +146,29 @@ def update_user_rank(
     db.refresh(user)
 
     return user
+
+
+@router.get(
+    "/users/me/party",
+    response_model=schemas.PartyResponse,
+)
+def get_my_party(
+    current_user: models.User = Depends(
+        get_current_user
+    ),
+    db: Session = Depends(get_db),
+):
+    current_member = db.scalar(
+        select(models.PartyMember).where(
+            models.PartyMember.user_id
+            == current_user.id
+        )
+    )
+
+    if current_member is None:
+        raise HTTPException(
+            status_code=404,
+            detail="当前用户没有加入小队",
+        )
+
+    return current_member.party

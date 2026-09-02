@@ -28,7 +28,7 @@ def create_leader_access_token(db, party_id, *, username):
 def test_party_accepts_quest():
     db = TestSessionLocal()
     category = create_category(db, name="讨伐")
-    quest = create_quest(db, title="低级任务", category_id=category.id, status="open")
+    quest = create_quest(db, title="低级任务", category_id=category.id, status="recruiting")
     party = create_party(db, name="接任务小队")
     access_token = create_leader_access_token(
         db,
@@ -51,13 +51,13 @@ def test_party_accepts_quest():
 
     quest_response = client.get(f"/quests/{quest_id}")
     assert quest_response.status_code == 200
-    assert quest_response.json()["status"] == "commenced"
+    assert quest_response.json()["status"] == "recruiting"
 
 
 def test_leader_cannot_accept_quest_for_another_party_returns_403():
     db = TestSessionLocal()
     category = create_category(db, name="护送")
-    quest = create_quest(db, title="护送木车", category_id=category.id, status="open")
+    quest = create_quest(db, title="护送木车", category_id=category.id, status="recruiting")
     own_party = create_party(db, name="接任务队长自己的小队")
     access_token = create_leader_access_token(
         db,
@@ -99,7 +99,7 @@ def test_accept_quest_missing_quest_returns_404():
 def test_same_party_cannot_accept_same_quest_twice():
     db = TestSessionLocal()
     category = create_category(db, name="讨伐")
-    quest = create_quest(db, title="重复接取", category_id=category.id, status="open")
+    quest = create_quest(db, title="重复接取", category_id=category.id, status="recruiting")
     party = create_party(db, name="重复接取队")
     access_token = create_leader_access_token(
         db,
@@ -119,68 +119,11 @@ def test_same_party_cannot_accept_same_quest_twice():
     assert second.json() == {"detail": "该小队已经接受过此任务"}
 
 
-def test_non_cooperative_quest_cannot_be_accepted_by_second_party_returns_409():
-    db = TestSessionLocal()
-    category = create_category(db, name="讨伐")
-    quest = create_quest(db, title="独占任务", category_id=category.id, status="open")
-    party_a = create_party(db, name="A队")
-    party_b = create_party(db, name="B队")
-    token_a = create_leader_access_token(db, party_a.id, username="exclusive_leader_a")
-    token_b = create_leader_access_token(db, party_b.id, username="exclusive_leader_b")
-    party_a_id = party_a.id
-    party_b_id = party_b.id
-    quest_id = quest.id
-    db.close()
-
-    first = client.post(
-        f"/parties/{party_a_id}/quests/{quest_id}",
-        headers={"Authorization": f"Bearer {token_a}"},
-    )
-    second = client.post(
-        f"/parties/{party_b_id}/quests/{quest_id}",
-        headers={"Authorization": f"Bearer {token_b}"},
-    )
-
-    assert first.status_code == 201
-    assert second.status_code == 409
-    assert second.json() == {"detail": "该任务已经被其他小队接受"}
-
-
-def test_cooperative_quest_allows_multiple_parties():
-    db = TestSessionLocal()
-    category = create_category(db, name="合作")
-    quest = create_quest(db, title="团队副本", category_id=category.id, status="open", is_cooperative=True)
-    party_a = create_party(db, name="合作队A")
-    party_b = create_party(db, name="合作队B")
-    token_a = create_leader_access_token(db, party_a.id, username="cooperative_leader_a")
-    token_b = create_leader_access_token(db, party_b.id, username="cooperative_leader_b")
-    party_a_id = party_a.id
-    party_b_id = party_b.id
-    quest_id = quest.id
-    db.close()
-
-    response_a = client.post(
-        f"/parties/{party_a_id}/quests/{quest_id}",
-        headers={"Authorization": f"Bearer {token_a}"},
-    )
-    response_b = client.post(
-        f"/parties/{party_b_id}/quests/{quest_id}",
-        headers={"Authorization": f"Bearer {token_b}"},
-    )
-
-    assert response_a.status_code == 201
-    assert response_b.status_code == 201
-
-    quest_response = client.get(f"/quests/{quest_id}")
-    assert quest_response.status_code == 200
-    assert quest_response.json()["status"] == "open"
-
-
 def test_get_party_quests():
     db = TestSessionLocal()
     category = create_category(db, name="调查")
-    quest_a = create_quest(db, title="任务A", category_id=category.id, status="open")
-    quest_b = create_quest(db, title="任务B", category_id=category.id, status="open")
+    quest_a = create_quest(db, title="任务A", category_id=category.id, status="recruiting")
+    quest_b = create_quest(db, title="任务B", category_id=category.id, status="recruiting")
     party = create_party(db, name="查询任务队")
     access_token = create_leader_access_token(
         db,
@@ -211,26 +154,19 @@ def test_get_quest_parties():
         db,
         title="集结讨伐",
         category_id=category.id,
-        status="open",
-        is_cooperative=True,
+        status="recruiting",
     )
     party_a = create_party(db, name="P1")
     party_b = create_party(db, name="P2")
-    token_a = create_leader_access_token(db, party_a.id, username="quest_parties_leader_a")
-    token_b = create_leader_access_token(db, party_b.id, username="quest_parties_leader_b")
-    party_a_id = party_a.id
-    party_b_id = party_b.id
+    db.add_all(
+        [
+            models.Participation(party_id=party_a.id, quest_id=quest.id),
+            models.Participation(party_id=party_b.id, quest_id=quest.id),
+        ]
+    )
+    db.commit()
     quest_id = quest.id
     db.close()
-
-    client.post(
-        f"/parties/{party_a_id}/quests/{quest_id}",
-        headers={"Authorization": f"Bearer {token_a}"},
-    )
-    client.post(
-        f"/parties/{party_b_id}/quests/{quest_id}",
-        headers={"Authorization": f"Bearer {token_b}"},
-    )
 
     response = client.get(f"/quests/{quest_id}/parties")
 
@@ -243,7 +179,7 @@ def test_get_quest_parties():
 def test_withdraw_from_quest():
     db = TestSessionLocal()
     category = create_category(db, name="采集")
-    quest = create_quest(db, title="采集药材", category_id=category.id, status="open")
+    quest = create_quest(db, title="采集药材", category_id=category.id, status="recruiting")
     party = create_party(db, name="退出队")
     access_token = create_leader_access_token(
         db,
@@ -264,13 +200,13 @@ def test_withdraw_from_quest():
 
     check_response = client.get(f"/quests/{quest_id}")
     assert check_response.status_code == 200
-    assert check_response.json()["status"] == "open"
+    assert check_response.json()["status"] == "recruiting"
 
 
 def test_withdraw_missing_participation_returns_404():
     db = TestSessionLocal()
     category = create_category(db, name="采集")
-    quest = create_quest(db, title="无参与任务", category_id=category.id, status="open")
+    quest = create_quest(db, title="无参与任务", category_id=category.id, status="recruiting")
     party = create_party(db, name="没参与队")
     access_token = create_leader_access_token(
         db,
@@ -293,7 +229,7 @@ def test_withdraw_missing_participation_returns_404():
 def test_last_party_withdraw_reopens_quest():
     db = TestSessionLocal()
     category = create_category(db, name="讨伐")
-    quest = create_quest(db, title="最终任务", category_id=category.id, status="open")
+    quest = create_quest(db, title="最终任务", category_id=category.id, status="recruiting")
     party = create_party(db, name="最后一个队")
     access_token = create_leader_access_token(
         db,
@@ -311,7 +247,7 @@ def test_last_party_withdraw_reopens_quest():
     assert response.status_code == 204
     check_response = client.get(f"/quests/{quest_id}")
     assert check_response.status_code == 200
-    assert check_response.json()["status"] == "open"
+    assert check_response.json()["status"] == "recruiting"
 
 def test_party_does_quest_flow():
     db = TestSessionLocal()
@@ -329,7 +265,7 @@ def test_party_does_quest_flow():
         description="护送商人穿过森林",
         completion_criteria="安全到达村落",
         category_id=category.id,
-        status="open",
+        status="recruiting",
     )
     party_id = party.id
     quest_id = quest.id
@@ -437,11 +373,11 @@ def test_accept_quest_compares_business_rank_order_and_has_no_failure_side_effec
     assert stored_quest is not None
     if expected_status == 201:
         assert participation is not None
-        assert stored_quest.status == "commenced"
+        assert stored_quest.status == "recruiting"
     else:
         assert response.json() == {"detail": "小队等级不足，无法接取该任务"}
         assert participation is None
-        assert stored_quest.status == "open"
+        assert stored_quest.status == "recruiting"
     db.close()
 
 
@@ -502,5 +438,5 @@ def test_accept_quest_uses_highest_member_and_recalculates_after_downgrade():
     stored_quest = db.get(models.Quest, second_quest_id)
     assert participation is None
     assert stored_quest is not None
-    assert stored_quest.status == "open"
+    assert stored_quest.status == "recruiting"
     db.close()

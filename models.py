@@ -9,10 +9,12 @@ class Base(DeclarativeBase):
 class AdventurerRank(str, Enum):
     #继承 str enum类
 #战略思想：它不属于可调整政策，也不允许管理员创造其他行
-#为什么不裸字典 列表？ Enum 把字符串包装成正式成员，不怕后来打错
+#为什么不裸字典 列表？ Enum 把字符串包装成正式成员，
+# 哪些值有资格被称为 Rank？
     COPPER = "copper"
     #左：Python代码中使用的成员名字
-    #右：保存、传输时使用的实际字符串值
+    #右：这是数据库和 JSON 使用的普通字符串。
+    #.value 只应该出现在数据库赋值的边界上
     IRON = "iron"
     SILVER = "silver"
     GOLD = "gold"
@@ -33,6 +35,27 @@ ADVENTURER_RANK_ORDER = {
     AdventurerRank.ADAMANTITE: 7,
 }
 
+class QuestStatus(str, Enum):
+    RECRUITING = "recruiting"
+    #开放接取，可以有零个或多个小队
+    COMMENCED = "commenced"
+    #已经开始，不再允许新小队接取
+    POSTPONED = "postponed"
+    FINISHED = "finished"
+    CANCELED = "canceled"
+    FAILED = "failed"
+
+QUEST_ALIVE_STATUSES = {
+    QuestStatus.RECRUITING,
+    QuestStatus.COMMENCED,
+    QuestStatus.POSTPONED,
+}
+
+QUEST_DEAD_STATUSES = {
+    QuestStatus.FINISHED,
+    QuestStatus.CANCELED,
+    QuestStatus.FAILED,
+}
 #这里开始才是数据库要用的
 class Character(Base):
     __tablename__ = "characters"
@@ -104,7 +127,12 @@ class Quest(Base):
     title: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(String)
     completion_criteria: Mapped[str] = mapped_column(String)
-    status: Mapped[str] = mapped_column(String, default="open")
+
+    status: Mapped[str] = mapped_column(
+    String,
+    default=QuestStatus.RECRUITING.value,
+    nullable=False,
+    )
 
     minimum_rank: Mapped[str] = mapped_column(
     String,
@@ -124,11 +152,6 @@ class Quest(Base):
     participation_list : Mapped[list["Participation"]] = relationship(
         back_populates="quest"
     )
-    is_cooperative: Mapped[bool] = mapped_column(
-        Boolean,
-        default= False
-    )
-
 
 class Party(Base):
     __tablename__ = "parties"
