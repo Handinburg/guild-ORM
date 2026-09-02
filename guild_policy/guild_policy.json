@@ -5,6 +5,7 @@
   },
   "party": {
     "max_name_length": 10,
+    "max_rank_gap": 1,
     "forbidden_name_parts":[
       "admin",
       "管理员",

@@ -9,7 +9,7 @@ import models
 import schemas
 
 from database import get_db
-from guild_policy_loader import (
+from guild_policy.loader import (
     GuildPolicy,
     get_current_policy,
 )
@@ -157,3 +157,73 @@ def check_party_creation_policy(
             )
 
     return party_data
+
+def check_party_rank_gap_policy(
+    party_id: int,
+    party_member_data: schemas.PartyMemberCreate,
+    db: Session = Depends(get_db),
+    current_policy: GuildPolicy = Depends(
+        get_current_policy
+    ),
+) -> schemas.PartyMemberCreate:
+    party = db.get(
+        models.Party,
+        party_id,
+    )
+
+    if party is None:
+        raise HTTPException(
+            status_code=404,
+            detail="小队不存在",
+        )
+
+    candidate_user = db.get(
+        models.User,
+        party_member_data.user_id,
+    )
+
+    if candidate_user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="用户不存在",
+        )
+
+    existing_rank_positions = [
+        models.ADVENTURER_RANK_ORDER[
+            models.AdventurerRank(
+                member.user.adventurer_rank
+            )
+        ]
+        for member in party.member_list
+    ]
+
+    candidate_rank = models.AdventurerRank(
+        candidate_user.adventurer_rank
+    )
+
+    candidate_rank_position = (
+        models.ADVENTURER_RANK_ORDER[
+            candidate_rank
+        ]
+    )
+
+    new_rank_positions = (
+        existing_rank_positions
+        + [candidate_rank_position]
+    )
+
+    new_rank_gap = (
+        max(new_rank_positions)
+        - min(new_rank_positions)
+    )
+
+    if (
+        new_rank_gap
+        > current_policy.party.max_rank_gap
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"新成员与小队现有成员的等级差距过大,目前政策允许全队相差{current_policy.party.max_rank_gap}",
+        )
+
+    return party_member_data

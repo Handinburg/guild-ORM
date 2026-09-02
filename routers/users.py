@@ -7,8 +7,8 @@ import schemas
 
 from database import get_db
 from security import hash_password, verify_password,create_access_token
-from auth import get_current_user
-from guild_policy_executor import check_user_registration_policy
+from auth import get_current_user,require_admin
+from guild_policy.executor import check_user_registration_policy
 
 
 
@@ -113,3 +113,36 @@ def get_my_user(
     ),
 ):
     return current_user
+
+
+@router.patch(
+    "/users/{user_id}/rank",
+    response_model=schemas.UserResponse,
+)
+def update_user_rank(
+    user_id: int,
+    rank_data: schemas.UserRankUpdate,
+    #拿右
+    db: Session = Depends(get_db),
+    _admin_user: models.User = Depends(require_admin),
+):
+    #拿左
+    user = db.get(
+        models.User,
+        user_id,
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="用户不存在",
+        )
+    #业务
+    user.adventurer_rank = (
+        rank_data.adventurer_rank.value
+    )
+
+    db.commit()
+    db.refresh(user)
+
+    return user

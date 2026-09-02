@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict
+import models
 
 
 class QuestCreate(BaseModel):
@@ -6,6 +7,7 @@ class QuestCreate(BaseModel):
     description: str
     completion_criteria: str
     category_id: int
+    minimum_rank: models.AdventurerRank = models.AdventurerRank.COPPER
     is_cooperative:bool = False
 
 class QuestResponse(BaseModel):
@@ -15,6 +17,7 @@ class QuestResponse(BaseModel):
     completion_criteria: str
     status: str
     category_id: int
+    minimum_rank: models.AdventurerRank
     is_cooperative: bool
 
     model_config = ConfigDict(from_attributes=True)
@@ -29,6 +32,7 @@ class QuestUpdate(BaseModel):
     completion_criteria: str | None = None
     category_id: int | None = None
     is_cooperative:bool | None = None
+    minimum_rank: models.AdventurerRank | None = None
 
 
 class PartyCreate(BaseModel):
@@ -45,6 +49,7 @@ class UserBriefResponse(BaseModel):
     id: int
     username: str | None
     adventurer_name:str | None
+    adventurer_rank:models.AdventurerRank
     model_config = ConfigDict(
         from_attributes=True
     )
@@ -100,6 +105,7 @@ class UserResponse(BaseModel):
     id: int
     username: str
     adventurer_name: str
+    adventurer_rank: models.AdventurerRank
     is_admin: bool
 
     model_config = ConfigDict(
@@ -117,3 +123,6 @@ class UserLogin(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+class UserRankUpdate(BaseModel):
+    adventurer_rank: models.AdventurerRank

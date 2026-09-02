@@ -18,6 +18,12 @@ class PartyPolicy(BaseModel):
     max_name_length : int = Field(
             ge=1,
         )
+    #0 → 只能同级组队
+    #1 → 最低和最高最多差一级
+    #2 → 最多差两级
+    max_rank_gap: int = Field(
+        ge=0,
+    )
     forbidden_name_parts :list
 
 class UserPolicy(BaseModel):

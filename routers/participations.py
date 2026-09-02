@@ -6,7 +6,7 @@ import models
 import schemas
 from database import get_db
 from auth import require_leader
-from guild_policy_executor import check_accept_quest_policy
+from guild_policy.executor import check_accept_quest_policy
 
 
 
@@ -75,7 +75,39 @@ def accept_quest(
             detail="该任务目前不开放",
         )
 
-#别看花眼 这个是创建类实例
+    #检测等级
+    party_rank = party.calculate_party_rank()
+
+    if party_rank is None:
+        raise HTTPException(
+            status_code=409,
+            detail="空小队不能接取任务",
+        )
+
+    minimum_rank = models.AdventurerRank(
+        quest.minimum_rank
+    )
+
+    party_rank_position = (
+        models.ADVENTURER_RANK_ORDER[
+            party_rank
+        ]
+    )
+
+    minimum_rank_position = (
+        models.ADVENTURER_RANK_ORDER[
+            minimum_rank
+        ]
+    )
+
+    if party_rank_position < minimum_rank_position:
+        raise HTTPException(
+            status_code=403,
+            detail="小队等级不足，无法接取该任务",
+        )
+
+#业务
+#创建类实例
     participation = models.Participation(
         party_id=party_id,
         quest_id=quest_id,

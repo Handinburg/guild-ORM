@@ -7,7 +7,10 @@ import schemas
 
 from database import get_db
 from auth import require_admin,require_leader
-from guild_policy_executor import check_party_creation_policy
+from guild_policy.executor import (
+    check_party_creation_policy,
+    check_party_rank_gap_policy,
+    )
 
 router = APIRouter(
     tags=["parties"],
@@ -97,9 +100,11 @@ def create_party(
 )
 def add_party_member(
     party_id: int,
-    party_member_data: schemas.PartyMemberCreate,
+    _leader = Depends(require_leader),
+    party_member_data: schemas.PartyMemberCreate= Depends(
+        check_party_rank_gap_policy
+    ),
     db: Session = Depends(get_db),
-    _leader = Depends(require_leader)
 ):
  #1.小队id检查
     party = db.get(

@@ -1,3 +1,6 @@
+from sqlalchemy import select
+
+import models
 from security import create_access_token
 import pytest
 from tests.helpers import (
@@ -9,6 +12,11 @@ from tests.helpers import (
     create_quest,
     create_user,
 )
+
+
+def authorization_headers(user_id):
+    token = create_access_token(user_id)
+    return {"Authorization": f"Bearer {token}"}
 
 
 def create_leader_access_token(db, party_id, *, username):
@@ -378,3 +386,121 @@ def test_participation_leader_routes_reject_ordinary_member_403(method):
 
     assert response.status_code == 403
     assert response.json() == {"detail": "需要队长权限"}
+
+
+# 接取任务等级门槛
+
+@pytest.mark.parametrize(
+    ("party_rank", "minimum_rank", "expected_status"),
+    [
+        ("silver", "silver", 201),
+        ("gold", "silver", 201),
+        ("iron", "silver", 403),
+    ],
+)
+def test_accept_quest_compares_business_rank_order_and_has_no_failure_side_effects(
+    party_rank,
+    minimum_rank,
+    expected_status,
+):
+    db = TestSessionLocal()
+    category = create_category(db, name="接取等级")
+    quest = create_quest(
+        db,
+        title="等级门槛任务",
+        category_id=category.id,
+        minimum_rank=minimum_rank,
+    )
+    party = create_party(db, name="接取等级队")
+    leader = create_user(db, username="rankleader", adventurer_rank=party_rank)
+    add_member(db, party.id, leader.id, is_leader=True)
+    quest_id = quest.id
+    party_id = party.id
+    headers = authorization_headers(leader.id)
+    db.close()
+
+    response = client.post(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers=headers,
+    )
+
+    assert response.status_code == expected_status, response.json()
+
+    db = TestSessionLocal()
+    participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    stored_quest = db.get(models.Quest, quest_id)
+    assert stored_quest is not None
+    if expected_status == 201:
+        assert participation is not None
+        assert stored_quest.status == "commenced"
+    else:
+        assert response.json() == {"detail": "小队等级不足，无法接取该任务"}
+        assert participation is None
+        assert stored_quest.status == "open"
+    db.close()
+
+
+def test_accept_quest_uses_highest_member_and_recalculates_after_downgrade():
+    db = TestSessionLocal()
+    category = create_category(db, name="动态接取")
+    first_quest = create_quest(
+        db,
+        title="降级前任务",
+        category_id=category.id,
+        minimum_rank=models.AdventurerRank.GOLD,
+    )
+    second_quest = create_quest(
+        db,
+        title="降级后任务",
+        category_id=category.id,
+        minimum_rank=models.AdventurerRank.GOLD,
+    )
+    party = create_party(db, name="动态接取队")
+    leader = create_user(db, username="lowleader", adventurer_rank=models.AdventurerRank.COPPER,)
+    strongest = create_user(db, username="strongest", adventurer_rank=models.AdventurerRank.GOLD,)
+    admin = create_user(db, username="rankmaster", is_admin=True)
+    add_member(db, party.id, leader.id, is_leader=True)
+    add_member(db, party.id, strongest.id)
+    first_quest_id = first_quest.id
+    second_quest_id = second_quest.id
+    party_id = party.id
+    strongest_id = strongest.id
+    leader_headers = authorization_headers(leader.id)
+    admin_headers = authorization_headers(admin.id)
+    db.close()
+
+    first_accept_response = client.post(
+        f"/parties/{party_id}/quests/{first_quest_id}",
+        headers=leader_headers,
+    )
+    downgrade_response = client.patch(
+        f"/users/{strongest_id}/rank",
+        json={"adventurer_rank": "silver"},
+        headers=admin_headers,
+    )
+    accept_response = client.post(
+        f"/parties/{party_id}/quests/{second_quest_id}",
+        headers=leader_headers,
+    )
+
+    assert first_accept_response.status_code == 201, first_accept_response.json()
+    assert downgrade_response.status_code == 200, downgrade_response.json()
+    assert accept_response.status_code == 403
+
+    db = TestSessionLocal()
+    participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == second_quest_id,
+        )
+    )
+    stored_quest = db.get(models.Quest, second_quest_id)
+    assert participation is None
+    assert stored_quest is not None
+    assert stored_quest.status == "open"
+    db.close()

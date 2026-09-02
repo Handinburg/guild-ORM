@@ -76,7 +76,7 @@ def create_quest(
 
     quest = models.Quest(**data)
 
-#剩下的就是填表 commit 成为.db里的一行
+#填表 
     db.add(quest)
     db.commit()
 
@@ -225,7 +225,9 @@ def update_quest(
 #用quest_data.model_dump(）方法把 Pydantic检测后的json 转换成普通字典对象update_data 
 # 方便之后用 .items() + setattr()批量修改。
     update_data = quest_data.model_dump(
-        exclude_unset=True
+        exclude_unset=True,
+        exclude_none=True,
+        #保护 不把”None“ ”null“当成patch提交给数据库
     )
     #有这cate？
     if "category_id" in update_data:
@@ -241,14 +243,8 @@ def update_quest(
             )
 # 遍历字典中的字段和值。
     for field, value in update_data.items():
-
- 
     #python自带函数：setattr(对象, "属性名", 值)
-       # 相当于：
-        # quest.title = value
-        # quest.description = value
     #用于动态修改对象属性
-    #配套的是只读的 getattr（）
         setattr(quest, field, value)
 
 # SQLAlchemy发现quest属性发生变化，

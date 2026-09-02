@@ -632,3 +632,52 @@ def test_party_leader_routes_reject_ordinary_member_403(
 
     assert party is not None
     db.close()
+
+
+# 小队动态等级
+
+def test_party_rank_is_none_when_empty_and_uses_highest_member_not_text_order():
+    db = TestSessionLocal()
+    party = create_party(db, name="动态等级队")
+
+    assert party.calculate_party_rank() is None
+
+    gold_user = create_user(
+        db,
+        username="goldmember",
+        adventurer_rank=models.AdventurerRank.GOLD,
+    )
+    silver_user = create_user(
+        db,
+        username="silvermem",
+        adventurer_rank=models.AdventurerRank.SILVER,
+    )
+    add_member(db, party.id, gold_user.id)
+    add_member(db, party.id, silver_user.id)
+    db.refresh(party)
+
+    # 字符串字典序会误判 silver > gold；业务顺序必须判定 gold 更高。
+    assert party.calculate_party_rank() == models.AdventurerRank.GOLD
+    db.close()
+
+
+def test_party_rank_recalculates_after_member_rank_changes():
+    db = TestSessionLocal()
+    party = create_party(db, name="重算等级队")
+    user = create_user(
+        db,
+        username="reranker",
+        adventurer_rank=models.AdventurerRank.GOLD,
+    )
+    add_member(db, party.id, user.id, is_leader=True)
+    db.refresh(party)
+
+    assert party.calculate_party_rank() == models.AdventurerRank.GOLD
+
+    user.adventurer_rank = models.AdventurerRank.IRON.value
+    db.commit()
+    db.refresh(party)
+
+    assert party.calculate_party_rank() == models.AdventurerRank.IRON
+    db.close()
+

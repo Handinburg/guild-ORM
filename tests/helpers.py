@@ -65,7 +65,8 @@ def create_user(db,username = "testuser",
                 #这些是默认值
                 adventurer_name="测试冒险者",
                 password_hash="test_password_hash",
-                is_admin = False
+                is_admin = False,
+                adventurer_rank=models.AdventurerRank.COPPER,
                 ):
     # 这个占位哈希只给不经过登录流程的业务测试使用。
     # 注册和登录测试必须走 /users/register，验证真实的 Argon2 哈希流程。
@@ -73,7 +74,8 @@ def create_user(db,username = "testuser",
         username=username,
         adventurer_name=adventurer_name,
         password_hash=password_hash,
-        is_admin = is_admin
+        is_admin=is_admin,
+        adventurer_rank=adventurer_rank,
     )
     db.add(user)
     db.commit()
@@ -98,6 +100,7 @@ def create_quest(
     category_id,
     status="open",
     is_cooperative=False,
+    minimum_rank=models.AdventurerRank.COPPER,
 ):
     quest = models.Quest(
         title=title,
@@ -106,6 +109,7 @@ def create_quest(
         category_id=category_id,
         status=status,
         is_cooperative=is_cooperative,
+        minimum_rank=minimum_rank,
     )
     db.add(quest)
     db.commit()

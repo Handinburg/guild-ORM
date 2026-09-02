@@ -9,6 +9,11 @@ from tests.helpers import (
 )
 
 
+def authorization_headers(user_id):
+    token = create_access_token(user_id)
+    return {"Authorization": f"Bearer {token}"}
+
+
 # 三、任务功能
 
 def test_create_quest_returns_201():
@@ -437,4 +442,146 @@ def test_update_quest_status_without_login_returns_401():
 
     assert quest is not None
     assert quest.status == "open"
+    db.close()
+
+
+# 任务最低等级
+
+def test_create_quest_defaults_minimum_rank_and_all_read_responses_include_it():
+    db = TestSessionLocal()
+    category = create_category(db, name="等级任务")
+    admin = create_user(db, username="questboss", is_admin=True)
+    category_id = category.id
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    response = client.post(
+        "/quests",
+        json={
+            "title": "默认等级任务",
+            "description": "测试",
+            "completion_criteria": "完成",
+            "category_id": category_id,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.json()
+    assert response.json()["minimum_rank"] == "copper"
+    quest_id = response.json()["id"]
+
+    get_response = client.get(f"/quests/{quest_id}")
+    list_response = client.get("/quests")
+
+    assert get_response.status_code == 200
+    assert get_response.json()["minimum_rank"] == "copper"
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["minimum_rank"] == "copper"
+
+    db = TestSessionLocal()
+    quest = db.get(models.Quest, quest_id)
+    assert quest is not None
+    assert quest.minimum_rank == "copper"
+    db.close()
+
+
+def test_create_quest_accepts_explicit_minimum_rank_and_rejects_invalid_rank():
+    db = TestSessionLocal()
+    category = create_category(db, name="显式等级")
+    admin = create_user(db, username="questchief", is_admin=True)
+    category_id = category.id
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    valid_response = client.post(
+        "/quests",
+        json={
+            "title": "黄金任务",
+            "description": "测试",
+            "completion_criteria": "完成",
+            "category_id": category_id,
+            "minimum_rank": "gold",
+        },
+        headers=headers,
+    )
+    invalid_response = client.post(
+        "/quests",
+        json={
+            "title": "错误等级任务",
+            "description": "测试",
+            "completion_criteria": "完成",
+            "category_id": category_id,
+            "minimum_rank": "diamond",
+        },
+        headers=headers,
+    )
+
+    assert valid_response.status_code == 201, valid_response.json()
+    assert valid_response.json()["minimum_rank"] == "gold"
+    assert invalid_response.status_code == 422
+
+
+def test_update_quest_preserves_omitted_minimum_rank_and_persists_explicit_rank():
+    db = TestSessionLocal()
+    category = create_category(db, name="更新等级")
+    quest = create_quest(
+        db,
+        title="白银任务",
+        category_id=category.id,
+        minimum_rank=models.AdventurerRank.SILVER,
+    )
+    admin = create_user(db, username="questedit", is_admin=True)
+    quest_id = quest.id
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    title_response = client.patch(
+        f"/quests/{quest_id}",
+        json={"title": "改名后的任务"},
+        headers=headers,
+    )
+    rank_response = client.patch(
+        f"/quests/{quest_id}",
+        json={"minimum_rank": "platinum"},
+        headers=headers,
+    )
+
+    assert title_response.status_code == 200, title_response.json()
+    assert title_response.json()["minimum_rank"] == "silver"
+    assert rank_response.status_code == 200, rank_response.json()
+    assert rank_response.json()["minimum_rank"] == "platinum"
+
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+    assert stored_quest is not None
+    assert stored_quest.minimum_rank == "platinum"
+    db.close()
+
+
+def test_update_quest_rejects_invalid_minimum_rank_without_mutating_database():
+    db = TestSessionLocal()
+    category = create_category(db, name="非法等级")
+    quest = create_quest(
+        db,
+        title="不能改坏的任务",
+        category_id=category.id,
+        minimum_rank="iron",
+    )
+    admin = create_user(db, username="badquest", is_admin=True)
+    quest_id = quest.id
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    response = client.patch(
+        f"/quests/{quest_id}",
+        json={"minimum_rank": "diamond"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+    assert stored_quest is not None
+    assert stored_quest.minimum_rank == "iron"
     db.close()

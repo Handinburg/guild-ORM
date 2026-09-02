@@ -5,8 +5,14 @@ from enum import Enum
 class Base(DeclarativeBase):
     pass
 
+#这些不是数据库里的东西 但我也放这了 纯粹不想拆文件
 class AdventurerRank(str, Enum):
+    #继承 str enum类
+#战略思想：它不属于可调整政策，也不允许管理员创造其他行
+#为什么不裸字典 列表？ Enum 把字符串包装成正式成员，不怕后来打错
     COPPER = "copper"
+    #左：Python代码中使用的成员名字
+    #右：保存、传输时使用的实际字符串值
     IRON = "iron"
     SILVER = "silver"
     GOLD = "gold"
@@ -15,6 +21,19 @@ class AdventurerRank(str, Enum):
     ORICHALCUM = "orichalcum"
     ADAMANTITE = "adamantite"
 
+#全局字典声明顺序
+ADVENTURER_RANK_ORDER = {
+    AdventurerRank.COPPER: 0,
+    AdventurerRank.IRON: 1,
+    AdventurerRank.SILVER: 2,
+    AdventurerRank.GOLD: 3,
+    AdventurerRank.PLATINUM: 4,
+    AdventurerRank.MITHRIL: 5,
+    AdventurerRank.ORICHALCUM: 6,
+    AdventurerRank.ADAMANTITE: 7,
+}
+
+#这里开始才是数据库要用的
 class Character(Base):
     __tablename__ = "characters"
 
@@ -24,6 +43,43 @@ class Character(Base):
     level: Mapped[int | None] = mapped_column(Integer)
     country_id: Mapped[int | None] = mapped_column(Integer)
     real_country_id: Mapped[int | None] = mapped_column(Integer)
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    username: Mapped[str] = mapped_column(
+        String,
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+
+    adventurer_name: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    password_hash: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    adventurer_rank: Mapped[str] = mapped_column(
+    String,
+    default=AdventurerRank.COPPER.value,
+    nullable=False,
+    )   
 
 
 class QuestCategory(Base):
@@ -119,6 +175,26 @@ class Party(Base):
     # 等于告诉 Python/SQLAlchemy：
     # 先把这个名字记下来，等所有类都定义完成以后，再去找 Participation。
 
+    #计算party rank的方法
+    def calculate_party_rank(
+        self,
+        #正在调用这个方法的 那个Party实例
+    ) -> AdventurerRank | None:
+        if not self.member_list:
+            return None
+
+        member_rank_list = [
+            AdventurerRank(
+                member.user.adventurer_rank
+            )
+            for member in self.member_list
+        ]
+
+        return max(
+            member_rank_list,
+            key=lambda rank: ADVENTURER_RANK_ORDER[rank],
+        )
+
 
 class PartyMember(Base):
     __tablename__ = "party_members"
@@ -179,40 +255,5 @@ class Participation(Base):
     )
 
 
-class User(Base):
-    __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(
-        Integer,
-        primary_key=True,
-    )
-
-    username: Mapped[str] = mapped_column(
-        String,
-        unique=True,
-        index=True,
-        nullable=False,
-    )
-
-    adventurer_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-    )
-
-    password_hash: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-    )
-
-    is_admin: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
-
-    adventurer_rank: Mapped[str] = mapped_column(
-    String,
-    default=AdventurerRank.COPPER.value,
-    nullable=False,
-    )   
 
