@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from database import get_db
-from auth import require_leader
+from auth import require_leader,require_admin,require_leader_or_admin
 from guild_policy.executor import check_accept_quest_policy
 
 
@@ -13,6 +13,7 @@ from guild_policy.executor import check_accept_quest_policy
 router = APIRouter(
     tags=["participations"],
 )
+
 
 #队长用 小队接任务
 @router.post(
@@ -123,6 +124,10 @@ def accept_quest(
 def get_party_quests(
     party_id: int,
     db: Session = Depends(get_db),
+    limit: int = 20,
+    offset: int = 0,
+    _admin = Depends(require_admin),
+
 ):
     party = db.get(models.Party, party_id)
 
@@ -142,6 +147,9 @@ def get_party_quests(
         .where(
             models.Participation.party_id == party_id,
         )
+        .order_by(models.Quest.id)
+        .offset(offset)
+        .limit(limit)
     ).all()
 #SELECT quests.*
 # FROM quests
@@ -159,6 +167,9 @@ def get_party_quests(
 def get_quest_parties(
     quest_id: int,
     db: Session = Depends(get_db),
+    limit: int = 20,
+    offset: int = 0,
+    _admin = Depends(require_admin),
 ):
     quest = db.get(models.Quest, quest_id)
 
@@ -178,21 +189,25 @@ def get_quest_parties(
         .where(
             models.Participation.quest_id == quest_id,
         )
+        .order_by(models.Party.id)
+        .offset(offset)
+        .limit(limit)
     ).all()
 
     return party_list
 
 
 #withdraw from quest
+
 @router.delete(
     "/parties/{party_id}/quests/{quest_id}",
     status_code=204,
 )
-def withdraw_from_quest(
+def delete_participation(
     party_id: int,
     quest_id: int,
     db: Session = Depends(get_db),
-    _leader = Depends(require_leader),
+    _leader_or_admin = Depends(require_leader_or_admin),
 ):
     quest = db.get(models.Quest, quest_id)
     #quest ect'?
@@ -215,7 +230,6 @@ def withdraw_from_quest(
             detail="该小队没有参与此任务",
         )
 
-    #quest zhit'?
     quest_status = models.QuestStatus(quest.status)
 
     if quest_status in models.QUEST_DEAD_STATUSES:

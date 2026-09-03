@@ -136,9 +136,11 @@ def test_get_existing_quest():
     quest = create_quest(db, title="采集蘑菇", category_id=category.id)
     quest_id = quest.id
     category_id = category.id
+    admin = create_user(db, username="questreader", is_admin=True)
+    headers = authorization_headers(admin.id)
     db.close()
 
-    response = client.get(f"/quests/{quest_id}")
+    response = client.get(f"/quests/{quest_id}", headers=headers)
 
     assert response.status_code == 200
     data = response.json()
@@ -148,7 +150,12 @@ def test_get_existing_quest():
 
 
 def test_get_missing_quest_returns_404():
-    response = client.get("/quests/999999")
+    db = TestSessionLocal()
+    admin = create_user(db, username="missingreader", is_admin=True)
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    response = client.get("/quests/999999", headers=headers)
 
     assert response.status_code == 404
     assert response.json() == {"detail": "任务不存在"}
@@ -262,7 +269,10 @@ def test_delete_quest():
     assert response.status_code == 204
     assert response.content == b""
 
-    check_response = client.get(f"/quests/{quest_id}")
+    check_response = client.get(
+        f"/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
     assert check_response.status_code == 404
     assert check_response.json() == {"detail": "任务不存在"}
 
@@ -316,15 +326,30 @@ def test_filter_quests_by_status():
     create_quest(db, title="A", category_id=category.id, status="recruiting")
     create_quest(db, title="B", category_id=category.id, status="commenced")
     create_quest(db, title="C", category_id=category.id, status="commenced")
+    admin = create_user(db, username="statusreader", is_admin=True)
+    headers = authorization_headers(admin.id)
     db.close()
 
-    response = client.get("/quests", params={"status": "commenced"})
+    response = client.get(
+        "/quests",
+        params={"status": "commenced"},
+        headers=headers,
+    )
 #GET筛选用 params= POST、PUT、PATCH填表用 json= ID放进网址{}
 
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
     assert {item["title"] for item in data} == {"B", "C"}
+
+    recruiting_response = client.get(
+        "/quests",
+        params={"status": "recruiting"},
+        headers=headers,
+    )
+
+    assert recruiting_response.status_code == 200
+    assert [item["title"] for item in recruiting_response.json()] == ["A"]
 
 
 def test_filter_quests_by_category_name():
@@ -334,14 +359,56 @@ def test_filter_quests_by_category_name():
     create_quest(db, title="讨伐怪物", category_id=category_a.id)
     create_quest(db, title="采集草药", category_id=category_b.id)
     create_quest(db, title="再次讨伐", category_id=category_a.id)
+    admin = create_user(db, username="categoryreader", is_admin=True)
+    headers = authorization_headers(admin.id)
     db.close()
 
-    response = client.get("/quests", params={"category_name": "讨伐"})
+    response = client.get(
+        "/quests",
+        params={"category_name": "讨伐"},
+        headers=headers,
+    )
 
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
     assert {item["title"] for item in data} == {"讨伐怪物", "再次讨伐"}
+
+
+def test_admin_quest_list_has_stable_pagination():
+    db = TestSessionLocal()
+    category = create_category(db, name="任务分页")
+    first = create_quest(db, title="第一页", category_id=category.id)
+    second = create_quest(db, title="第二页", category_id=category.id)
+    third = create_quest(db, title="第三页", category_id=category.id)
+    admin = create_user(db, username="questqueryadmin", is_admin=True)
+    headers = authorization_headers(admin.id)
+    expected_id = second.id
+    assert first.id < second.id < third.id
+    db.close()
+
+    response = client.get(
+        "/quests",
+        params={"limit": 1, "offset": 1},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [expected_id]
+
+
+@pytest.mark.parametrize("path", ["/quests", "/quests/999999"])
+def test_admin_quest_queries_reject_unauthenticated_and_normal_users(path):
+    without_login = client.get(path)
+
+    db = TestSessionLocal()
+    normal_user = create_user(db, username="questquerynormal")
+    headers = authorization_headers(normal_user.id)
+    db.close()
+    without_admin = client.get(path, headers=headers)
+
+    assert without_login.status_code == 401
+    assert without_admin.status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -541,8 +608,8 @@ def test_create_quest_defaults_minimum_rank_and_all_read_responses_include_it():
     assert response.json()["minimum_rank"] == "copper"
     quest_id = response.json()["id"]
 
-    get_response = client.get(f"/quests/{quest_id}")
-    list_response = client.get("/quests")
+    get_response = client.get(f"/quests/{quest_id}", headers=headers)
+    list_response = client.get("/quests", headers=headers)
 
     assert get_response.status_code == 200
     assert get_response.json()["minimum_rank"] == "copper"

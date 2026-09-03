@@ -39,8 +39,12 @@ def check_accept_quest_policy(
         .where(
             models.Participation.party_id
             == party_id,
-            models.Quest.status
-            == "accepted",
+            models.Quest.status.in_(
+                [
+                    status.value
+                    for status in models.QUEST_ALIVE_STATUSES
+                ]
+            ),
         )
     )
     #找右
@@ -151,6 +155,37 @@ def check_party_creation_policy(
         normalized_forbidden_part = forbidden_part.strip().casefold()
                 #防止空禁止名""杀掉所有请求
         if normalized_forbidden_part in normalized_partyname:
+            raise HTTPException(
+                status_code=400,
+                detail="包含禁止使用的内容",
+            )
+
+    return party_data
+
+
+def check_party_update_policy(
+    party_data: schemas.PartyUpdate,
+    current_policy: GuildPolicy = Depends(get_current_policy),
+) -> schemas.PartyUpdate:
+    party_name = party_data.name
+
+    if len(party_name) > current_policy.party.max_name_length:
+        raise HTTPException(
+            status_code=400,
+            detail="队伍名过长",
+        )
+
+    if any(character.isspace() for character in party_name):
+        raise HTTPException(
+            status_code=400,
+            detail="不能包含空白字符",
+        )
+
+    normalized_party_name = party_name.casefold()
+
+    for forbidden_part in current_policy.party.forbidden_name_parts:
+        normalized_forbidden_part = forbidden_part.strip().casefold()
+        if normalized_forbidden_part and normalized_forbidden_part in normalized_party_name:
             raise HTTPException(
                 status_code=400,
                 detail="包含禁止使用的内容",

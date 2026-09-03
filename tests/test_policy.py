@@ -11,7 +11,9 @@ from tests.helpers import (
     TestSessionLocal,
     add_member,
     client,
+    create_category,
     create_party,
+    create_quest,
     create_user,
 )
 
@@ -374,4 +376,60 @@ def test_rank_gap_policy_uses_whole_party_extrema(
         )
     )
     assert membership_count == (1 if expected_status == 201 else 0)
+    db.close()
+
+
+def test_max_active_quest_policy_counts_all_alive_statuses_and_has_no_side_effect():
+    db = TestSessionLocal()
+    category = create_category(db, name="活跃上限")
+    party = create_party(db, name="上限测试队")
+    leader = create_user(db, username="limitboss")
+    add_member(db, party.id, leader.id, is_leader=True)
+
+    for index, status in enumerate(models.QUEST_ALIVE_STATUSES):
+        quest = create_quest(
+            db,
+            title=f"活跃任务{index}",
+            category_id=category.id,
+            status=status.value,
+        )
+        db.add(
+            models.Participation(
+                party_id=party.id,
+                quest_id=quest.id,
+            )
+        )
+
+    candidate_quest = create_quest(
+        db,
+        title="不应接取的任务",
+        category_id=category.id,
+        status=models.QuestStatus.RECRUITING.value,
+    )
+    db.commit()
+    party_id = party.id
+    candidate_quest_id = candidate_quest.id
+    headers = authorization_headers(leader.id)
+    db.close()
+
+    response = client.post(
+        f"/parties/{party_id}/quests/{candidate_quest_id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "小队同时接取的任务不能超过3个"}
+
+    db = TestSessionLocal()
+    participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == candidate_quest_id,
+        )
+    )
+    stored_quest = db.get(models.Quest, candidate_quest_id)
+
+    assert participation is None
+    assert stored_quest is not None
+    assert stored_quest.status == "recruiting"
     db.close()

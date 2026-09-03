@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -6,9 +6,10 @@ import models
 import schemas
 
 from database import get_db
-from auth import require_admin,require_leader
+from auth import require_admin,require_leader,require_leader_or_admin
 from guild_policy.executor import (
     check_party_creation_policy,
+    check_party_update_policy,
     check_party_rank_gap_policy,
     )
 
@@ -23,11 +24,11 @@ router = APIRouter(
     status_code=201,
 )#201 Created
 def create_party(
+    _admin_user: models.User = Depends(require_admin),
     party_data: schemas.PartyCreate=Depends(
         check_party_creation_policy),
     #接受数据 并进行政策检验
     db: Session = Depends(get_db),
-    _admin_user: models.User = Depends(require_admin),
 ):
     #检查队长
         #1.有这人？
@@ -92,7 +93,57 @@ def create_party(
 
     return party
 
-#给某个小队加人 队长用
+@router.patch(
+    "/parties/{party_id}",
+    response_model=schemas.PartyResponse,
+)
+def update_party(
+    party_id: int,
+    _admin_user: models.User = Depends(require_admin),
+    party_data: schemas.PartyUpdate = Depends(check_party_update_policy),
+    db: Session = Depends(get_db),
+):
+    party = db.get(
+        models.Party,
+        party_id,
+    )
+
+    if party is None:
+        raise HTTPException(
+            status_code=404,
+            detail="小队不存在",
+        )
+
+    party_with_same_name = db.scalar(
+        select(models.Party).where(
+            models.Party.name == party_data.name,
+            models.Party.id != party_id,
+        )
+    )
+
+    if party_with_same_name is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="小队名称已存在",
+        )
+
+    update_data = party_data.model_dump(
+        exclude_unset=True
+    )
+
+    for field, value in update_data.items():
+        setattr(
+            party,
+            field,
+            value,
+        )
+
+    db.commit()
+    db.refresh(party)
+
+    return party
+
+#给某个小队加人 
 @router.post(
     "/parties/{party_id}/members",
     response_model=schemas.PartyMemberResponse,
@@ -100,7 +151,7 @@ def create_party(
 )
 def add_party_member(
     party_id: int,
-    _leader = Depends(require_leader),
+    _leader_or_admin = Depends(require_leader_or_admin),
     party_member_data: schemas.PartyMemberCreate= Depends(
         check_party_rank_gap_policy
     ),
@@ -179,6 +230,7 @@ def add_party_member(
 def get_party(
     party_id: int,
     db: Session = Depends(get_db),
+    _admin = Depends(require_admin),
 ):
     party = db.get(
         models.Party,
@@ -200,10 +252,15 @@ def get_party(
 )
 def get_parties(
     db: Session = Depends(get_db),
+    limit: int = 20,
+    offset: int = 0,
+    _admin = Depends(require_admin),
 ):
     statement = (
         select(models.Party)
         .order_by(models.Party.id)
+        .offset(offset)
+        .limit(limit)
     )
 
     party_list = db.scalars(statement).all()
@@ -219,7 +276,7 @@ def remove_party_member(
     party_id: int,
     user_id: int,
     db: Session = Depends(get_db),
-    _leader = Depends(require_leader)
+    _leader_or_admin = Depends(require_leader_or_admin)
 ):
     party_member = db.scalars(
         select(models.PartyMember).where(
@@ -234,22 +291,31 @@ def remove_party_member(
             detail="该用户不在此小队中",
         )
 
+    if party_member.is_leader:
+        raise HTTPException(
+            status_code=409,
+            detail="不能直接移除队长，请先更换队长",
+        )
+
     db.delete(party_member)
     db.commit()
 
-#队长用 删除某小队
+
 @router.delete(
     "/parties/{party_id}",
-    status_code=204,#204 no content
+    status_code=204,
 )
 def delete_party(
     party_id: int,
     db: Session = Depends(get_db),
-    _leader = Depends(require_leader),
-):  
-    party = db. get(models.Party,
-                    party_id,
-                )
+    _admin: models.User = Depends(
+        require_admin
+    ),
+):
+    party = db.get(
+        models.Party,
+        party_id,
+    )
 
     if party is None:
         raise HTTPException(
@@ -257,8 +323,29 @@ def delete_party(
             detail="小队不存在",
         )
 
+    participations = db.scalars(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id
+        )
+    ).all()
+
+    for participation in participations:
+        db.delete(participation)
+
+    party_members = db.scalars(
+        select(models.PartyMember).where(
+            models.PartyMember.party_id == party_id
+        )
+    ).all()
+
+    for party_member in party_members:
+        db.delete(party_member)
+
     db.delete(party)
+
     db.commit()
+
+    return Response(status_code=204)
 
 #换队长
 @router.patch(
@@ -269,7 +356,7 @@ def change_party_leader(
     party_id: int,
     leader_data: schemas.LeaderUpdate,
     db: Session = Depends(get_db),
-    _leader = Depends(require_leader),
+    _leader_or_admin= Depends(require_leader_or_admin),
 ):
     party = db.get(
         models.Party,
@@ -310,6 +397,7 @@ def change_party_leader(
                     detail="无效修改,此人已是队长"
                 )
         old_leader_party_member.is_leader = False
+        db.flush()
     new_leader_party_member.is_leader = True
     #为什么写外面 因为就算之前没有队长 （old返回none） 
     # 我们也可以设置新队长

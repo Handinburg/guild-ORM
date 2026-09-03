@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import models
-from database import get_db
+from database import enable_sqlite_foreign_keys, get_db
 from main import app
 
 
@@ -15,6 +15,7 @@ test_engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+event.listen(test_engine, "connect", enable_sqlite_foreign_keys)
 
 TestSessionLocal = sessionmaker(
     autocommit=False,

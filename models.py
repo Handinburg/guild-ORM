@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String,Boolean, ForeignKey
+from sqlalchemy import Integer, String,Boolean, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
 from enum import Enum
 
@@ -222,6 +222,15 @@ class Party(Base):
 class PartyMember(Base):
     __tablename__ = "party_members"
 
+    __table_args__ = (
+        Index(
+            "uq_party_members_one_leader",
+            "party_id",
+            unique=True,
+            sqlite_where=text("is_leader = 1"),
+        ),
+    )
+
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True,
@@ -255,6 +264,14 @@ class PartyMember(Base):
 class Participation(Base):
     __tablename__ = "participations"
     #多对多中间表来啦
+
+    __table_args__ = (
+        UniqueConstraint(
+            "party_id",
+            "quest_id",
+            name="uq_participations_party_quest",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         Integer,

@@ -113,6 +113,7 @@ def create_quest(
 def get_quest(
     quest_id: int,
     db: Session = Depends(get_db),
+    _admin = Depends(require_admin)
 ):
     quest = db.get(models.Quest, quest_id)
 
@@ -140,6 +141,7 @@ def get_quests(
     limit: int = 20,
     offset: int = 0,
     db: Session = Depends(get_db),
+    _admin = Depends(require_admin),
 ):
 #要求传入 可选过滤项 状态和 任务类别名
 #预设 limit 和 offset 分页 

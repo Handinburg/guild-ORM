@@ -32,10 +32,19 @@ class QuestUpdate(BaseModel):
     category_id: int | None = None
     minimum_rank: models.AdventurerRank | None = None
 
+class QuestStatusUpdate(BaseModel):
+    status: models.QuestStatus
+    #status 必须是一个合法的 QuestStatus
+
 
 class PartyCreate(BaseModel):
     name: str
     leader_user_id: int
+
+class PartyUpdate(BaseModel):
+    name: str
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PartyMemberCreate(BaseModel):
@@ -88,9 +97,6 @@ class ParticipationResponse(BaseModel):
         from_attributes=True,
     )
 
-class QuestStatusUpdate(BaseModel):
-    status: models.QuestStatus
-    #status 必须是一个合法的 QuestStatus
 
 
 class UserRegister(BaseModel):

@@ -160,3 +160,34 @@ def require_leader(
             detail="不是这个小队",
         )
     return current_member
+
+
+def require_leader_or_admin(
+    party_id: int,
+    current_user: models.User = Depends(
+        get_current_user
+    ),
+    db: Session = Depends(get_db),
+) -> models.User:
+    if current_user.is_admin:
+        return current_user
+
+    current_member = db.scalar(
+        select(models.PartyMember).where(
+            models.PartyMember.user_id
+            == current_user.id,
+            models.PartyMember.party_id
+            == party_id,
+        )
+    )
+
+    if (
+        current_member is None
+        or not current_member.is_leader
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="需要本队队长或管理员权限",
+        )
+
+    return current_user

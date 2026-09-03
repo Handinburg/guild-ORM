@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 import models
 from security import create_access_token
@@ -49,9 +50,11 @@ def test_party_accepts_quest():
     assert data["party_id"] == party_id
     assert data["quest_id"] == quest_id
 
-    quest_response = client.get(f"/quests/{quest_id}")
-    assert quest_response.status_code == 200
-    assert quest_response.json()["status"] == "recruiting"
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+    assert stored_quest is not None
+    assert stored_quest.status == "recruiting"
+    db.close()
 
 
 def test_leader_cannot_accept_quest_for_another_party_returns_403():
@@ -119,6 +122,161 @@ def test_same_party_cannot_accept_same_quest_twice():
     assert second.json() == {"detail": "该小队已经接受过此任务"}
 
 
+def test_multiple_parties_can_accept_same_quest_and_withdraw_independently():
+    db = TestSessionLocal()
+    category = create_category(db, name="multi_party")
+    quest = create_quest(
+        db,
+        title="shared_quest",
+        category_id=category.id,
+        status=models.QuestStatus.RECRUITING,
+    )
+    party_a = create_party(db, name="party_a")
+    party_b = create_party(db, name="party_b")
+    token_a = create_leader_access_token(db, party_a.id, username="leader_a")
+    token_b = create_leader_access_token(db, party_b.id, username="leader_b")
+    quest_id = quest.id
+    party_a_id = party_a.id
+    party_b_id = party_b.id
+    db.close()
+
+    response_a = client.post(
+        f"/parties/{party_a_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    response_b = client.post(
+        f"/parties/{party_b_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+
+    assert response_a.status_code == 201, response_a.json()
+    assert response_b.status_code == 201, response_b.json()
+
+    withdraw_response = client.delete(
+        f"/parties/{party_a_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+
+    assert withdraw_response.status_code == 204
+
+    db = TestSessionLocal()
+    party_a_participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_a_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    party_b_participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_b_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    stored_quest = db.get(models.Quest, quest_id)
+
+    assert party_a_participation is None
+    assert party_b_participation is not None
+    assert stored_quest is not None
+    assert stored_quest.status == models.QuestStatus.RECRUITING.value
+    db.close()
+
+
+@pytest.mark.parametrize(
+    "quest_status",
+    [
+        models.QuestStatus.COMMENCED,
+        models.QuestStatus.POSTPONED,
+        models.QuestStatus.FINISHED,
+        models.QuestStatus.CANCELED,
+        models.QuestStatus.FAILED,
+    ],
+)
+def test_only_recruiting_quest_can_be_accepted_without_side_effects(quest_status):
+    db = TestSessionLocal()
+    category = create_category(db, name="accept_status")
+    quest = create_quest(
+        db,
+        title="not_recruiting",
+        category_id=category.id,
+        status=quest_status,
+    )
+    party = create_party(db, name="status_party")
+    token = create_leader_access_token(db, party.id, username="status_leader")
+    quest_id = quest.id
+    party_id = party.id
+    db.close()
+
+    response = client.post(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 409
+
+    db = TestSessionLocal()
+    participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    stored_quest = db.get(models.Quest, quest_id)
+
+    assert participation is None
+    assert stored_quest is not None
+    assert stored_quest.status == quest_status.value
+    db.close()
+
+
+def test_database_rejects_duplicate_party_and_quest_participation():
+    db = TestSessionLocal()
+    category = create_category(db, name="联合唯一")
+    quest = create_quest(db, title="唯一接取", category_id=category.id)
+    party = create_party(db, name="唯一接取队")
+    first_participation = models.Participation(
+        party_id=party.id,
+        quest_id=quest.id,
+    )
+    db.add(first_participation)
+    db.commit()
+
+    duplicate_participation = models.Participation(
+        party_id=party.id,
+        quest_id=quest.id,
+    )
+    db.add(duplicate_participation)
+
+    with pytest.raises(IntegrityError):
+        db.commit()
+
+    db.rollback()
+    participation_list = db.scalars(
+        select(models.Participation).where(
+            models.Participation.party_id == party.id,
+            models.Participation.quest_id == quest.id,
+        )
+    ).all()
+
+    assert len(participation_list) == 1
+    db.close()
+
+
+def test_database_rejects_participation_with_missing_foreign_keys():
+    db = TestSessionLocal()
+    participation = models.Participation(
+        party_id=999999,
+        quest_id=999999,
+    )
+    db.add(participation)
+
+    with pytest.raises(IntegrityError):
+        db.commit()
+
+    db.rollback()
+    assert db.scalar(select(models.Participation)) is None
+    db.close()
+
+
 def test_get_party_quests():
     db = TestSessionLocal()
     category = create_category(db, name="调查")
@@ -130,6 +288,8 @@ def test_get_party_quests():
         party.id,
         username="query_party_quests_leader",
     )
+    admin = create_user(db, username="partyquestadmin", is_admin=True)
+    admin_headers = authorization_headers(admin.id)
     party_id = party.id
     quest_a_id = quest_a.id
     quest_b_id = quest_b.id
@@ -139,12 +299,24 @@ def test_get_party_quests():
     client.post(f"/parties/{party_id}/quests/{quest_a_id}", headers=headers)
     client.post(f"/parties/{party_id}/quests/{quest_b_id}", headers=headers)
 
-    response = client.get(f"/parties/{party_id}/quests")
+    response = client.get(
+        f"/parties/{party_id}/quests",
+        headers=admin_headers,
+    )
 
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
     assert {item["title"] for item in data} == {"任务A", "任务B"}
+    assert [item["id"] for item in data] == [quest_a_id, quest_b_id]
+
+    page_response = client.get(
+        f"/parties/{party_id}/quests",
+        params={"limit": 1, "offset": 1},
+        headers=admin_headers,
+    )
+    assert page_response.status_code == 200
+    assert [item["id"] for item in page_response.json()] == [quest_b_id]
 
 
 def test_get_quest_parties():
@@ -165,15 +337,28 @@ def test_get_quest_parties():
         ]
     )
     db.commit()
+    party_a_id = party_a.id
+    party_b_id = party_b.id
+    admin = create_user(db, username="questpartyadmin", is_admin=True)
+    headers = authorization_headers(admin.id)
     quest_id = quest.id
     db.close()
 
-    response = client.get(f"/quests/{quest_id}/parties")
+    response = client.get(f"/quests/{quest_id}/parties", headers=headers)
 
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
     assert {item["name"] for item in data} == {"P1", "P2"}
+    assert [item["id"] for item in data] == [party_a_id, party_b_id]
+
+    page_response = client.get(
+        f"/quests/{quest_id}/parties",
+        params={"limit": 1, "offset": 1},
+        headers=headers,
+    )
+    assert page_response.status_code == 200
+    assert [item["id"] for item in page_response.json()] == [party_b_id]
 
 
 def test_withdraw_from_quest():
@@ -198,9 +383,11 @@ def test_withdraw_from_quest():
     assert response.status_code == 204
     assert response.content == b""
 
-    check_response = client.get(f"/quests/{quest_id}")
-    assert check_response.status_code == 200
-    assert check_response.json()["status"] == "recruiting"
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+    assert stored_quest is not None
+    assert stored_quest.status == "recruiting"
+    db.close()
 
 
 def test_withdraw_missing_participation_returns_404():
@@ -226,7 +413,55 @@ def test_withdraw_missing_participation_returns_404():
     assert response.json() == {"detail": "该小队没有参与此任务"}
 
 
-def test_last_party_withdraw_reopens_quest():
+@pytest.mark.parametrize(
+    "quest_status",
+    [
+        models.QuestStatus.FINISHED,
+        models.QuestStatus.CANCELED,
+        models.QuestStatus.FAILED,
+    ],
+)
+def test_closed_quest_cannot_be_withdrawn_without_side_effects(quest_status):
+    db = TestSessionLocal()
+    category = create_category(db, name="withdraw_status")
+    quest = create_quest(
+        db,
+        title="closed_quest",
+        category_id=category.id,
+        status=quest_status,
+    )
+    party = create_party(db, name="closed_party")
+    token = create_leader_access_token(db, party.id, username="closed_leader")
+    participation = models.Participation(party_id=party.id, quest_id=quest.id)
+    db.add(participation)
+    db.commit()
+    quest_id = quest.id
+    party_id = party.id
+    db.close()
+
+    response = client.delete(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 409
+
+    db = TestSessionLocal()
+    stored_participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    stored_quest = db.get(models.Quest, quest_id)
+
+    assert stored_participation is not None
+    assert stored_quest is not None
+    assert stored_quest.status == quest_status.value
+    db.close()
+
+
+def test_last_party_withdraw_keeps_quest_recruiting():
     db = TestSessionLocal()
     category = create_category(db, name="讨伐")
     quest = create_quest(db, title="最终任务", category_id=category.id, status="recruiting")
@@ -245,9 +480,11 @@ def test_last_party_withdraw_reopens_quest():
     response = client.delete(f"/parties/{party_id}/quests/{quest_id}", headers=headers)
 
     assert response.status_code == 204
-    check_response = client.get(f"/quests/{quest_id}")
-    assert check_response.status_code == 200
-    assert check_response.json()["status"] == "recruiting"
+    db = TestSessionLocal()
+    stored_quest = db.get(models.Quest, quest_id)
+    assert stored_quest is not None
+    assert stored_quest.status == "recruiting"
+    db.close()
 
 def test_party_does_quest_flow():
     db = TestSessionLocal()
@@ -278,7 +515,10 @@ def test_party_does_quest_flow():
     )
     assert accept_response.status_code == 201
 
-    party_quests = client.get(f"/parties/{party_id}/quests")
+    party_quests = client.get(
+        f"/parties/{party_id}/quests",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
     assert party_quests.status_code == 200
     assert any(item["id"] == quest_id for item in party_quests.json())
     #返回的任务列表中，只要有一个任务的 ID 等于刚才那个任务 ID，就通过。
@@ -290,9 +530,97 @@ def test_party_does_quest_flow():
     assert update_status_response.status_code == 200
     assert update_status_response.json()["status"] == "finished"
 
-    final_response = client.get(f"/quests/{quest_id}")
+    final_response = client.get(
+        f"/quests/{quest_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
     assert final_response.status_code == 200
     assert final_response.json()["status"] == "finished"
+
+
+def test_admin_can_delete_participation_without_deleting_party_or_quest():
+    db = TestSessionLocal()
+    category = create_category(db, name="管理员解除参与")
+    quest = create_quest(db, title="保留的任务", category_id=category.id)
+    party = create_party(db, name="保留的小队")
+    leader = create_user(db, username="keptleader")
+    add_member(db, party.id, leader.id, is_leader=True)
+    participation = models.Participation(party_id=party.id, quest_id=quest.id)
+    admin = create_user(db, username="participationadmin", is_admin=True)
+    db.add(participation)
+    db.commit()
+    party_id = party.id
+    quest_id = quest.id
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    response = client.delete(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+    db = TestSessionLocal()
+    stored_participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    assert stored_participation is None
+    assert db.get(models.Party, party_id) is not None
+    assert db.get(models.Quest, quest_id) is not None
+    db.close()
+
+
+def test_admin_who_is_not_party_leader_cannot_accept_quest():
+    db = TestSessionLocal()
+    category = create_category(db, name="管理员不能代接")
+    quest = create_quest(db, title="队长专属接取", category_id=category.id)
+    party = create_party(db, name="队长专属队")
+    leader = create_user(db, username="soleleader")
+    add_member(db, party.id, leader.id, is_leader=True)
+    admin = create_user(db, username="acceptadmin", is_admin=True)
+    party_id = party.id
+    quest_id = quest.id
+    headers = authorization_headers(admin.id)
+    db.close()
+
+    response = client.post(
+        f"/parties/{party_id}/quests/{quest_id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+    db = TestSessionLocal()
+    participation = db.scalar(
+        select(models.Participation).where(
+            models.Participation.party_id == party_id,
+            models.Participation.quest_id == quest_id,
+        )
+    )
+    assert participation is None
+    db.close()
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/parties/999999/quests", "/quests/999999/parties"],
+)
+def test_admin_participation_queries_require_admin_before_resource_lookup(path):
+    without_login = client.get(path)
+
+    db = TestSessionLocal()
+    normal_user = create_user(db, username="participationquerynormal")
+    headers = authorization_headers(normal_user.id)
+    db.close()
+    without_admin = client.get(path, headers=headers)
+
+    assert without_login.status_code == 401
+    assert without_admin.status_code == 403
 
 
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
@@ -321,7 +649,12 @@ def test_participation_leader_routes_reject_ordinary_member_403(method):
     )
 
     assert response.status_code == 403
-    assert response.json() == {"detail": "需要队长权限"}
+    expected_detail = (
+        "需要队长权限"
+        if method == "POST"
+        else "需要本队队长或管理员权限"
+    )
+    assert response.json() == {"detail": expected_detail}
 
 
 # 接取任务等级门槛
