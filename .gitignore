@@ -14,6 +14,7 @@ venv/
 
 # SQLite数据库
 *.db
+guild_before_alembic.db
 
 # 编辑器
 .vscode/

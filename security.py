@@ -4,10 +4,18 @@
 from pwdlib import PasswordHash
 #→ pwdlib提供的一个类，专门负责生成和验证密码哈希
 
+from pathlib import Path
 import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
+
+from dotenv import load_dotenv
+
+
+load_dotenv(
+    Path(__file__).resolve().parent / ".env"
+)
 
 password_hasher = PasswordHash.recommended()
 #→ 给我一台配置好的密码处理机器
@@ -24,13 +32,18 @@ def hash_password(password: str) -> str:
 #到时候数据库里就存这个哈希值
 
 
-JWT_SECRET_KEY = os.getenv(
-    "JWT_SECRET_KEY",
-    "development-secret-change-before-deploy",
-)
+def load_jwt_secret_key() -> str:
+    secret_key = os.getenv("JWT_SECRET_KEY")
+
+    if not secret_key:
+        raise RuntimeError("未配置 JWT_SECRET_KEY")
+
+    return secret_key
+
+
+JWT_SECRET_KEY = load_jwt_secret_key()
 
 JWT_ALGORITHM = "HS256"
-
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 #jwt外挂配置 准备好算法 印章 时间
 

@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 import models
 from database import enable_sqlite_foreign_keys, get_db
 from main import app
+from security import create_access_token
 
 
 # 使用独立的内存数据库，绝不读写正式 guild.db。
@@ -126,3 +127,8 @@ def add_member(db, party_id, user_id, is_leader=False):
     db.commit()
     db.refresh(member)
     return member
+
+
+def authorization_headers(user_id):
+    token = create_access_token(user_id)
+    return {"Authorization": f"Bearer {token}"}
